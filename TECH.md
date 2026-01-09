@@ -4,7 +4,7 @@
 
 | 項目 | 內容 |
 |------|------|
-| 文件版本 | 3.1 |
+| 文件版本 | 3.2 |
 | 建立日期 | 2025-01-10 |
 | 最後更新 | 2026-01-10 |
 | 專案代號 | ECOMMERCE-MSA-POC |
@@ -1160,6 +1160,7 @@ public class AuditAspect {
             .result(error == null ? "SUCCESS" : "FAILURE")
             .errorMessage(error != null ? error.getMessage() : null)
             .clientIp(contextHolder.getClientIp().orElse("unknown"))
+            .correlationId(contextHolder.getCorrelationId().orElse(null))  // 從 MDC 擷取
             .build();
 
         repository.save(log);
@@ -1171,7 +1172,69 @@ public class AuditAspect {
 }
 ```
 
-#### 9.2.3 PayloadProcessor
+#### 9.2.3 AuditContextHolder
+
+```java
+// libs/audit-lib/src/main/java/com/example/audit/context/AuditContextHolder.java
+package com.example.audit.context;
+
+import org.slf4j.MDC;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+import java.util.Optional;
+
+/**
+ * 稽核上下文持有者 - 從各種來源擷取稽核所需資訊
+ */
+@Component
+public class AuditContextHolder {
+
+    private final AuditProperties properties;
+
+    /** 從 SecurityContext 取得當前使用者名稱 */
+    public Optional<String> getCurrentUsername() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.isAuthenticated()) {
+            return Optional.of(auth.getName());
+        }
+        return Optional.of("ANONYMOUS");
+    }
+
+    /** 從 RequestContext 取得 Client IP */
+    public Optional<String> getClientIp() {
+        var attrs = RequestContextHolder.getRequestAttributes();
+        if (attrs instanceof ServletRequestAttributes servletAttrs) {
+            var request = servletAttrs.getRequest();
+            String ip = request.getHeader("X-Forwarded-For");
+            return Optional.ofNullable(ip != null ? ip.split(",")[0].trim()
+                                                  : request.getRemoteAddr());
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * 從 MDC 取得 Correlation ID
+     * 支援多種常見 key: correlationId, traceId, X-Correlation-ID
+     */
+    public Optional<String> getCorrelationId() {
+        String correlationId = MDC.get("correlationId");
+        if (correlationId == null) {
+            correlationId = MDC.get("traceId");
+        }
+        if (correlationId == null) {
+            correlationId = MDC.get("X-Correlation-ID");
+        }
+        return Optional.ofNullable(correlationId);
+    }
+
+    public String getServiceName() {
+        return properties.getServiceName();
+    }
+}
+```
+
+#### 9.2.4 PayloadProcessor
 
 ```java
 // libs/audit-lib/src/main/java/com/example/audit/processor/PayloadProcessor.java
@@ -1244,7 +1307,55 @@ dependencies {
 }
 ```
 
-#### 9.3.2 自動配置
+#### 9.3.2 AuditProperties（動態設定）
+
+```java
+// libs/audit-lib/src/main/java/com/example/audit/config/AuditProperties.java
+package com.example.audit.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import java.util.List;
+
+/**
+ * 稽核設定屬性 - 支援動態重載
+ *
+ * 使用 @RefreshScope 搭配 @ConfigurationProperties
+ * 透過 /actuator/refresh 端點或 Spring Cloud Config 觸發重載
+ */
+@RefreshScope
+@ConfigurationProperties(prefix = "audit")
+public class AuditProperties {
+
+    /** 是否啟用稽核 */
+    private boolean enabled = true;
+
+    /** 服務名稱（用於識別稽核來源） */
+    private String serviceName;
+
+    /** Payload 設定 */
+    private Payload payload = new Payload();
+
+    /** 遮蔽設定 */
+    private Masking masking = new Masking();
+
+    public static class Payload {
+        /** Payload 最大大小（bytes），預設 64 KB */
+        private int maxSize = 65536;
+        // getters/setters
+    }
+
+    public static class Masking {
+        /** 預設遮蔽欄位清單 */
+        private List<String> defaultFields = List.of("password", "secret", "token");
+        // getters/setters
+    }
+
+    // getters/setters
+}
+```
+
+#### 9.3.3 自動配置
 
 ```java
 // libs/audit-lib/src/main/java/com/example/audit/config/AuditAutoConfiguration.java
@@ -1252,6 +1363,7 @@ package com.example.audit.config;
 
 @Configuration
 @EnableAspectJAutoProxy
+@EnableConfigurationProperties(AuditProperties.class)
 @ConditionalOnProperty(name = "audit.enabled", havingValue = "true", matchIfMissing = true)
 public class AuditAutoConfiguration {
 
@@ -1259,8 +1371,15 @@ public class AuditAutoConfiguration {
     @ConditionalOnMissingBean
     public AuditAspect auditAspect(AuditLogRepository repository,
                                     PayloadProcessor processor,
-                                    AuditMetrics metrics) {
-        return new AuditAspect(repository, processor, metrics);
+                                    AuditMetrics metrics,
+                                    AuditContextHolder contextHolder) {
+        return new AuditAspect(repository, processor, metrics, contextHolder);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AuditContextHolder auditContextHolder(AuditProperties properties) {
+        return new AuditContextHolder(properties);
     }
 
     @Bean
@@ -1276,7 +1395,7 @@ public class AuditAutoConfiguration {
 }
 ```
 
-#### 9.3.3 應用程式配置
+#### 9.3.4 應用程式配置
 
 ```yaml
 # application.yml
@@ -1316,7 +1435,10 @@ libs/audit-lib/
     ├── aspect/
     │   └── AuditAspect.java
     ├── config/
-    │   └── AuditAutoConfiguration.java
+    │   ├── AuditAutoConfiguration.java
+    │   └── AuditProperties.java           # @RefreshScope 支援動態重載
+    ├── context/
+    │   └── AuditContextHolder.java        # 從 SecurityContext/MDC 擷取上下文
     ├── domain/
     │   └── AuditLog.java
     ├── metrics/

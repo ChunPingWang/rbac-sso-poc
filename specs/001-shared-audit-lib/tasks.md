@@ -67,7 +67,7 @@ Based on plan.md structure:
 ### Implementation for User Story 1
 
 - [ ] T014 [P] [US1] Create `@Auditable` annotation in `libs/audit-lib/src/main/java/com/example/audit/annotation/Auditable.java`
-- [ ] T015 [P] [US1] Create `AuditContextHolder` for username/IP extraction in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/context/AuditContextHolder.java`
+- [ ] T015 [P] [US1] Create `AuditContextHolder` for username/IP/correlationId extraction (from SecurityContext, RequestContext, MDC) in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/context/AuditContextHolder.java`
 - [ ] T016 [P] [US1] Create `PayloadProcessor` with Jackson serialization in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/processor/PayloadProcessor.java`
 - [ ] T017 [US1] Create `AuditAspect` with `@Around` advice in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/aspect/AuditAspect.java`
 - [ ] T018 [US1] Implement try-finally pattern in AuditAspect to ensure business operations never fail due to audit errors
@@ -147,7 +147,7 @@ Based on plan.md structure:
 - [ ] T044 [P] [US4] Create `EmailFieldMasker` with partial visibility in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/processor/maskers/EmailFieldMasker.java`
 - [ ] T045 [US4] Add `maskFields` support to `@Auditable` annotation and PayloadProcessor
 - [ ] T046 [US4] Add `audit.masking.default-fields` configuration to AuditProperties
-- [ ] T047 [US4] Implement dynamic configuration reload without restart via `@ConfigurationProperties` refresh
+- [ ] T047 [US4] Implement dynamic configuration reload via `@ConfigurationProperties` + `@RefreshScope` (requires Spring Cloud Config or `/actuator/refresh` endpoint)
 
 **Checkpoint**: All user stories should now be independently functional
 
