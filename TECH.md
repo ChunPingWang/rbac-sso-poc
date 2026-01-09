@@ -1,1044 +1,1346 @@
-# TECH: 應用程式技術架構文件
+# TECH: 技術架構文件
 
 ## 文件資訊
 
 | 項目 | 內容 |
 |------|------|
-| 文件版本 | 1.0 |
+| 文件版本 | 3.1 |
 | 建立日期 | 2025-01-10 |
-| 專案代號 | SSO-RBAC-POC |
-| 適用範圍 | Spring Boot API Application |
+| 最後更新 | 2026-01-10 |
+| 專案代號 | ECOMMERCE-MSA-POC |
+| 架構模式 | Hexagonal Architecture + CQRS + DDD |
 
 ---
 
-## 1. 架構概覽
+## 1. 技術棧總覽
 
-### 1.1 系統架構圖
+| Category | Technology | Version |
+|----------|------------|---------|
+| Language | Java | 17 (LTS) |
+| Framework | Spring Boot | 3.3.x |
+| Build Tool | Gradle | 8.5+ |
+| Gateway | Spring Cloud Gateway | 4.1.x |
+| Security | Spring Security + OAuth2 | 6.3.x |
+| API Doc | SpringDoc OpenAPI | 2.5.x |
+| Database | H2 (Dev) / PostgreSQL (Prod) | - |
+| ORM | Spring Data JPA | 3.3.x |
+| AOP | Spring AOP | 6.1.x |
+| Audit | audit-lib (Shared) | 1.0.x |
+| Metrics | Micrometer | 1.12.x |
+| Architecture Test | ArchUnit | 1.2.x |
+| Container | Docker | 24.x |
+| Orchestration | Kubernetes | 1.28+ |
+
+---
+
+## 2. 六角形架構 (Hexagonal Architecture)
+
+### 2.1 架構概念
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           System Architecture                                    │
+│                     Hexagonal Architecture (Ports & Adapters)                    │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                  │
-│    ┌─────────────┐                                                              │
-│    │   Client    │                                                              │
-│    │ (Browser/   │                                                              │
-│    │  Mobile)    │                                                              │
-│    └──────┬──────┘                                                              │
-│           │                                                                      │
-│           │ HTTPS                                                               │
-│           ▼                                                                      │
-│    ┌─────────────────────────────────────────────────────────────────────┐      │
-│    │                    Spring Boot Application                          │      │
-│    ├─────────────────────────────────────────────────────────────────────┤      │
-│    │  ┌─────────────────────────────────────────────────────────────┐   │      │
-│    │  │                   Presentation Layer                         │   │      │
-│    │  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐    │   │      │
-│    │  │  │ Public      │ │ User        │ │ Admin               │    │   │      │
-│    │  │  │ Controller  │ │ Controller  │ │ Controller          │    │   │      │
-│    │  │  └─────────────┘ └─────────────┘ └─────────────────────┘    │   │      │
-│    │  └─────────────────────────────────────────────────────────────┘   │      │
-│    │                              │                                      │      │
-│    │  ┌─────────────────────────────────────────────────────────────┐   │      │
-│    │  │                    Security Layer                            │   │      │
-│    │  │  ┌──────────────┐ ┌──────────────┐ ┌────────────────────┐   │   │      │
-│    │  │  │ JWT Filter   │ │ Role Voter   │ │ Method Security    │   │   │      │
-│    │  │  │              │ │              │ │ @PreAuthorize      │   │   │      │
-│    │  │  └──────────────┘ └──────────────┘ └────────────────────┘   │   │      │
-│    │  └─────────────────────────────────────────────────────────────┘   │      │
-│    │                              │                                      │      │
-│    │  ┌─────────────────────────────────────────────────────────────┐   │      │
-│    │  │                    Business Layer                            │   │      │
-│    │  │  ┌──────────────┐ ┌──────────────┐ ┌────────────────────┐   │   │      │
-│    │  │  │ User Service │ │ Role Service │ │ Resource Service   │   │   │      │
-│    │  │  └──────────────┘ └──────────────┘ └────────────────────┘   │   │      │
-│    │  └─────────────────────────────────────────────────────────────┘   │      │
-│    └─────────────────────────────────────────────────────────────────────┘      │
-│                              │                                                   │
-│                              │ JWKS                                             │
-│                              ▼                                                   │
-│                       ┌─────────────┐                                           │
-│                       │  Keycloak   │                                           │
-│                       │    (IdP)    │                                           │
-│                       └─────────────┘                                           │
+│  核心原則：                                                                      │
+│  ═════════                                                                       │
+│  • 業務邏輯（Domain）位於架構中心，不依賴任何外部技術                            │
+│  • 透過 Ports（介面）定義與外部世界的互動契約                                    │
+│  • Adapters 實作 Ports，處理具體的技術細節                                       │
+│  • 依賴方向：外層 → 內層（Adapters → Application → Domain）                     │
+│                                                                                  │
+│                          ┌─────────────────┐                                    │
+│                          │    Driving      │                                    │
+│                          │   Adapters      │                                    │
+│                          │  (Left Side)    │                                    │
+│                          │                 │                                    │
+│                          │ • REST API      │                                    │
+│                          │ • GraphQL       │                                    │
+│                          │ • Message Queue │                                    │
+│                          └────────┬────────┘                                    │
+│                                   │                                             │
+│                                   │ calls                                       │
+│                                   ▼                                             │
+│                          ┌─────────────────┐                                    │
+│                          │  Input Ports    │                                    │
+│                          │  (Use Cases)    │                                    │
+│                          │                 │                                    │
+│                          │ • CommandHandler│                                    │
+│                          │ • QueryHandler  │                                    │
+│                          └────────┬────────┘                                    │
+│                                   │                                             │
+│          ┌────────────────────────┼────────────────────────┐                   │
+│          │                        │                        │                   │
+│          │     ╔══════════════════╧══════════════════╗     │                   │
+│          │     ║         APPLICATION LAYER           ║     │                   │
+│          │     ║  • Command Services                 ║     │                   │
+│          │     ║  • Query Services                   ║     │                   │
+│          │     ║  • DTOs / Commands / Queries        ║     │                   │
+│          │     ╚══════════════════╤══════════════════╝     │                   │
+│          │                        │                        │                   │
+│          │     ╔══════════════════╧══════════════════╗     │                   │
+│          │     ║           DOMAIN LAYER              ║     │                   │
+│          │     ║         (Pure Business)             ║     │                   │
+│          │     ║                                     ║     │                   │
+│          │     ║  • Aggregates & Entities            ║     │                   │
+│          │     ║  • Value Objects                    ║     │                   │
+│          │     ║  • Domain Services                  ║     │                   │
+│          │     ║  • Domain Events                    ║     │                   │
+│          │     ║  • Repository Interfaces (Ports)    ║     │                   │
+│          │     ║                                     ║     │                   │
+│          │     ║  ⚠️ NO external dependencies!       ║     │                   │
+│          │     ╚══════════════════╤══════════════════╝     │                   │
+│          │                        │                        │                   │
+│          └────────────────────────┼────────────────────────┘                   │
+│                                   │                                             │
+│                                   │ defines                                     │
+│                                   ▼                                             │
+│                          ┌─────────────────┐                                    │
+│                          │  Output Ports   │                                    │
+│                          │  (Interfaces)   │                                    │
+│                          │                 │                                    │
+│                          │ • Repository    │                                    │
+│                          │ • EventPublisher│                                    │
+│                          └────────┬────────┘                                    │
+│                                   │                                             │
+│                                   │ implemented by                              │
+│                                   ▼                                             │
+│                          ┌─────────────────┐                                    │
+│                          │    Driven       │                                    │
+│                          │   Adapters      │                                    │
+│                          │  (Right Side)   │                                    │
+│                          │                 │                                    │
+│                          │ • JPA Repo      │                                    │
+│                          │ • Kafka         │                                    │
+│                          │ • HTTP Client   │                                    │
+│                          └─────────────────┘                                    │
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 1.2 技術棧
+### 2.2 分層依賴規則
 
-| Layer | Technology | Version |
-|-------|------------|---------|
-| Runtime | Java | 21 (LTS) |
-| Framework | Spring Boot | 3.3.x |
-| Security | Spring Security | 6.3.x |
-| OAuth2 | Spring OAuth2 Resource Server | 6.3.x |
-| Build Tool | Maven | 3.9.x |
-| Container | Docker | 24.x |
-| API Doc | SpringDoc OpenAPI | 2.5.x |
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           Layer Dependencies                                     │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │  ADAPTER LAYER (Infrastructure)                                          │   │
+│  │  ─────────────────────────────────                                       │   │
+│  │  Driving Adapters:                  Driven Adapters:                     │   │
+│  │  • REST Controllers                 • JPA Repositories                  │   │
+│  │  • Message Listeners                • Event Publishers                  │   │
+│  │                                                                          │   │
+│  │  可依賴：Application, Domain, 技術框架 (Spring, JPA...)                  │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+│                                     │                                           │
+│                                     │ depends on                                │
+│                                     ▼                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │  APPLICATION LAYER                                                       │   │
+│  │  ─────────────────                                                       │   │
+│  │  • Command Handlers, Query Handlers                                      │   │
+│  │  • Application Services                                                  │   │
+│  │  • DTOs, Commands, Queries                                               │   │
+│  │                                                                          │   │
+│  │  可依賴：Domain Layer                                                    │   │
+│  │  ⚠️ 不可依賴：Adapter Layer                                              │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+│                                     │                                           │
+│                                     │ depends on                                │
+│                                     ▼                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │  DOMAIN LAYER                                                            │   │
+│  │  ────────────                                                            │   │
+│  │  • Aggregates, Entities, Value Objects                                   │   │
+│  │  • Domain Services, Domain Events                                        │   │
+│  │  • Repository Interfaces (Output Ports)                                  │   │
+│  │                                                                          │   │
+│  │  ⚠️ 絕對不可依賴：任何其他層、任何框架（Spring, JPA, Jackson...）       │   │
+│  │  ⚠️ 只能使用：Java 標準庫                                                │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 2. 專案結構
+## 3. SOLID 原則應用
 
-### 2.1 目錄結構
+### 3.1 SRP - 單一職責原則
+
+```java
+// ❌ 違反 SRP：一個類別做太多事
+class ProductService {
+    public Product createProduct(...) { }      // 寫入
+    public List<Product> findAll() { }         // 讀取
+    public void adjustStock(...) { }           // 庫存
+    public Report generateReport() { }         // 報表
+}
+
+// ✅ 遵循 SRP：CQRS 分離
+class ProductCommandService {                  // 只處理寫入
+    public ProductId handle(CreateProductCommand cmd) { }
+    public void handle(UpdateProductCommand cmd) { }
+}
+
+class ProductQueryService {                    // 只處理讀取
+    public ProductDetailView handle(GetProductByIdQuery q) { }
+    public PagedResult<ProductListView> handle(ListProductsQuery q) { }
+}
+
+class InventoryCommandService {                // 獨立的庫存服務
+    public void handle(AdjustStockCommand cmd) { }
+}
+```
+
+### 3.2 OCP - 開放封閉原則
+
+```java
+// ✅ 對擴展開放，對修改封閉
+// Domain Event Handler 介面
+public interface DomainEventHandler<T extends DomainEvent> {
+    void handle(T event);
+}
+
+// 新增功能只需新增類別
+@Component
+class CreateInventoryOnProductCreated implements DomainEventHandler<ProductCreated> {
+    public void handle(ProductCreated event) { /* 建立庫存 */ }
+}
+
+@Component
+class NotifyAdminOnProductCreated implements DomainEventHandler<ProductCreated> {
+    public void handle(ProductCreated event) { /* 通知管理員 */ }
+}
+```
+
+### 3.3 LSP - 里氏替換原則
+
+```java
+// Domain Layer 定義介面
+public interface ProductRepository {
+    Optional<Product> findById(ProductId id);
+    Product save(Product product);
+}
+
+// Adapter Layer 實作 - 兩種實作可互相替換
+@Repository
+class JpaProductRepository implements ProductRepository { /* JPA 實作 */ }
+
+class InMemoryProductRepository implements ProductRepository { /* 測試用 */ }
+```
+
+### 3.4 ISP - 介面隔離原則
+
+```java
+// ✅ 分離 Command 和 Query 介面
+interface ProductRepository {              // Write 用
+    Optional<Product> findById(ProductId id);
+    Product save(Product product);
+}
+
+interface ProductReadRepository {          // Query 用
+    Optional<ProductDetailView> findDetailById(UUID id);
+    Page<ProductListView> findAllActive(Pageable pageable);
+}
+```
+
+### 3.5 DIP - 依賴反轉原則
+
+```java
+// Domain Layer 定義抽象（介面）
+public interface ProductRepository {
+    Product save(Product product);
+}
+
+// Application Layer 依賴抽象
+@Service
+class ProductCommandService {
+    private final ProductRepository repository;  // 依賴介面，不是具體類別
+}
+
+// Adapter Layer 實作抽象
+@Repository
+class JpaProductRepository implements ProductRepository {
+    // 依賴方向反轉：Adapter → Domain
+}
+```
+
+---
+
+## 4. 專案結構
+
+### 4.1 微服務內部結構（六角形架構）
 
 ```
-spring-api/
-├── src/
-│   ├── main/
-│   │   ├── java/com/example/sso/
-│   │   │   ├── SsoApiApplication.java           # 應用程式入口
-│   │   │   ├── config/
-│   │   │   │   ├── SecurityConfig.java          # Spring Security 配置
-│   │   │   │   ├── OpenApiConfig.java           # Swagger/OpenAPI 配置
-│   │   │   │   └── CorsConfig.java              # CORS 配置
-│   │   │   ├── controller/
-│   │   │   │   ├── PublicController.java        # 公開 API
-│   │   │   │   ├── UserController.java          # 使用者 API
-│   │   │   │   └── AdminController.java         # 管理員 API
-│   │   │   ├── service/
-│   │   │   │   ├── UserService.java             # 使用者服務
-│   │   │   │   └── AuditService.java            # 稽核服務
-│   │   │   ├── dto/
-│   │   │   │   ├── UserProfileDto.java          # 使用者資料 DTO
-│   │   │   │   ├── ResourceDto.java             # 資源 DTO
-│   │   │   │   └── ApiResponse.java             # 統一回應格式
-│   │   │   ├── security/
-│   │   │   │   ├── KeycloakRoleConverter.java   # Keycloak 角色轉換器
-│   │   │   │   └── JwtAuditFilter.java          # JWT 稽核過濾器
-│   │   │   └── exception/
-│   │   │       ├── GlobalExceptionHandler.java  # 全域例外處理
-│   │   │       └── ApiException.java            # 自訂例外
-│   │   └── resources/
-│   │       ├── application.yml                  # 主配置檔
-│   │       ├── application-local.yml            # 本地開發配置
-│   │       └── application-docker.yml           # Docker 環境配置
-│   └── test/
-│       └── java/com/example/sso/
-│           ├── controller/
-│           │   └── UserControllerTest.java
-│           └── security/
-│               └── SecurityConfigTest.java
+services/product-service/
+├── build.gradle
 ├── Dockerfile
-├── pom.xml
-└── README.md
-```
-
-### 2.2 Maven 依賴 (pom.xml)
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
-         https://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <modelVersion>4.0.0</modelVersion>
-    
-    <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.3.5</version>
-        <relativePath/>
-    </parent>
-    
-    <groupId>com.example</groupId>
-    <artifactId>sso-api</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
-    <name>SSO RBAC PoC API</name>
-    <description>Spring Boot API with Keycloak SSO and RBAC</description>
-    
-    <properties>
-        <java.version>21</java.version>
-    </properties>
-    
-    <dependencies>
-        <!-- Spring Boot Web -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
-        
-        <!-- Spring Security OAuth2 Resource Server -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
-        </dependency>
-        
-        <!-- Spring Boot Actuator (Health Check) -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-        
-        <!-- Spring Boot Validation -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
-        </dependency>
-        
-        <!-- OpenAPI / Swagger -->
-        <dependency>
-            <groupId>org.springdoc</groupId>
-            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-            <version>2.5.0</version>
-        </dependency>
-        
-        <!-- Lombok (Optional) -->
-        <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
-            <optional>true</optional>
-        </dependency>
-        
-        <!-- Test Dependencies -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.security</groupId>
-            <artifactId>spring-security-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
-    
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration>
-                    <excludes>
-                        <exclude>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                        </exclude>
-                    </excludes>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
-</project>
+└── src/main/java/com/example/product/
+    │
+    ├── ProductServiceApplication.java
+    │
+    │   ╔═══════════════════════════════════════════════════════╗
+    │   ║                    DOMAIN LAYER                       ║
+    │   ║               (無任何外部依賴)                        ║
+    │   ╚═══════════════════════════════════════════════════════╝
+    │
+    ├── domain/
+    │   ├── model/
+    │   │   ├── aggregate/
+    │   │   │   ├── Product.java            # Product 聚合根
+    │   │   │   └── Inventory.java          # Inventory 聚合根
+    │   │   └── valueobject/
+    │   │       ├── ProductId.java
+    │   │       ├── ProductCode.java
+    │   │       ├── Money.java
+    │   │       ├── Quantity.java
+    │   │       └── AuditInfo.java
+    │   │
+    │   ├── event/                          # 領域事件
+    │   │   ├── DomainEvent.java
+    │   │   ├── ProductCreated.java
+    │   │   ├── ProductUpdated.java
+    │   │   └── StockAdjusted.java
+    │   │
+    │   ├── repository/                     # Repository 介面 (Output Ports)
+    │   │   ├── ProductRepository.java
+    │   │   └── InventoryRepository.java
+    │   │
+    │   └── exception/
+    │       └── ProductNotFoundException.java
+    │
+    │   ╔═══════════════════════════════════════════════════════╗
+    │   ║                  APPLICATION LAYER                    ║
+    │   ╚═══════════════════════════════════════════════════════╝
+    │
+    ├── application/
+    │   ├── port/
+    │   │   ├── input/
+    │   │   │   ├── command/
+    │   │   │   │   ├── CreateProductCommand.java
+    │   │   │   │   ├── UpdateProductCommand.java
+    │   │   │   │   └── AdjustStockCommand.java
+    │   │   │   └── query/
+    │   │   │       ├── GetProductByIdQuery.java
+    │   │   │       └── ListProductsQuery.java
+    │   │   │
+    │   │   └── output/
+    │   │       ├── ProductReadRepository.java
+    │   │       └── DomainEventPublisher.java
+    │   │
+    │   ├── service/
+    │   │   ├── ProductCommandService.java
+    │   │   └── ProductQueryService.java
+    │   │
+    │   └── dto/
+    │       ├── ProductDetailView.java
+    │       └── ProductListView.java
+    │
+    │   ╔═══════════════════════════════════════════════════════╗
+    │   ║                   ADAPTER LAYER                       ║
+    │   ╚═══════════════════════════════════════════════════════╝
+    │
+    └── adapter/
+        ├── inbound/
+        │   └── rest/
+        │       ├── ProductCommandController.java
+        │       ├── ProductQueryController.java
+        │       └── dto/
+        │           ├── CreateProductRequest.java
+        │           └── UpdateProductRequest.java
+        │
+        ├── outbound/
+        │   └── persistence/
+        │       ├── JpaProductRepository.java
+        │       ├── JpaProductReadRepository.java
+        │       └── entity/
+        │           ├── ProductJpaEntity.java
+        │           └── mapper/
+        │               └── ProductMapper.java
+        │
+        └── config/
+            ├── SecurityConfig.java
+            └── OpenApiConfig.java
 ```
 
 ---
 
-## 3. 安全架構
+## 5. 核心程式碼實作
 
-### 3.1 認證流程
-
-```
-┌─────────┐                  ┌──────────┐                  ┌───────────┐
-│ Client  │                  │ Keycloak │                  │ Spring API│
-└────┬────┘                  └────┬─────┘                  └─────┬─────┘
-     │                            │                              │
-     │  1. Login (user/pass)      │                              │
-     │───────────────────────────▶│                              │
-     │                            │                              │
-     │  2. JWT Tokens             │                              │
-     │◀───────────────────────────│                              │
-     │                            │                              │
-     │  3. API Request            │                              │
-     │  Authorization: Bearer xxx │                              │
-     │───────────────────────────────────────────────────────────▶
-     │                            │                              │
-     │                            │  4. Fetch JWKS (cached)      │
-     │                            │◀─────────────────────────────│
-     │                            │                              │
-     │                            │  5. Return Public Keys       │
-     │                            │─────────────────────────────▶│
-     │                            │                              │
-     │                            │      6. Validate JWT         │
-     │                            │      7. Extract Roles        │
-     │                            │      8. Check Authorization  │
-     │                            │                              │
-     │  9. API Response           │                              │
-     │◀──────────────────────────────────────────────────────────│
-```
-
-### 3.2 Spring Security 配置
+### 5.1 Domain Layer - Value Object
 
 ```java
-// src/main/java/com/example/sso/config/SecurityConfig.java
-package com.example.sso.config;
+// domain/model/valueobject/Money.java
+package com.example.product.domain.model.valueobject;
 
-import com.example.sso.security.KeycloakRoleConverter;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
-import org.springframework.security.web.SecurityFilterChain;
+import java.math.BigDecimal;
+import java.util.Objects;
 
-@Configuration
-@EnableWebSecurity
-@EnableMethodSecurity(prePostEnabled = true)
-public class SecurityConfig {
-
-    @Value("${spring.security.oauth2.resourceserver.jwt.jwk-set-uri}")
-    private String jwkSetUri;
-
-    @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http
-            // 停用 CSRF（Stateless API 不需要）
-            .csrf(csrf -> csrf.disable())
-            
-            // Stateless Session
-            .sessionManagement(session -> 
-                session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            
-            // 授權規則
-            .authorizeHttpRequests(auth -> auth
-                // 公開端點
-                .requestMatchers(
-                    "/api/public/**",
-                    "/actuator/health",
-                    "/actuator/info",
-                    "/swagger-ui/**",
-                    "/v3/api-docs/**"
-                ).permitAll()
-                
-                // 管理員端點
-                .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                
-                // 使用者端點
-                .requestMatchers("/api/user/**").hasAnyRole("USER", "ADMIN")
-                
-                // 其他請求需認證
-                .anyRequest().authenticated()
-            )
-            
-            // OAuth2 Resource Server 配置
-            .oauth2ResourceServer(oauth2 -> oauth2
-                .jwt(jwt -> jwt
-                    .jwtAuthenticationConverter(jwtAuthenticationConverter())
-                )
-            );
-        
-        return http.build();
+/**
+ * 金額 Value Object - 不可變，自我驗證
+ */
+public final class Money {
+    
+    private final BigDecimal amount;
+    
+    private Money(BigDecimal amount) {
+        this.amount = Objects.requireNonNull(amount).setScale(2);
     }
-
-    @Bean
-    public JwtDecoder jwtDecoder() {
-        return NimbusJwtDecoder.withJwkSetUri(jwkSetUri).build();
+    
+    public static Money of(BigDecimal amount) {
+        return new Money(amount);
     }
-
-    @Bean
-    public JwtAuthenticationConverter jwtAuthenticationConverter() {
-        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
-        converter.setJwtGrantedAuthoritiesConverter(new KeycloakRoleConverter());
-        return converter;
+    
+    public static Money zero() {
+        return new Money(BigDecimal.ZERO);
     }
-}
-```
-
-### 3.3 Keycloak 角色轉換器
-
-```java
-// src/main/java/com/example/sso/security/KeycloakRoleConverter.java
-package com.example.sso.security;
-
-import org.springframework.core.convert.converter.Converter;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.oauth2.jwt.Jwt;
-
-import java.util.*;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-public class KeycloakRoleConverter implements Converter<Jwt, Collection<GrantedAuthority>> {
-
-    private static final String REALM_ACCESS_CLAIM = "realm_access";
-    private static final String RESOURCE_ACCESS_CLAIM = "resource_access";
-    private static final String ROLES_KEY = "roles";
-    private static final String ROLE_PREFIX = "ROLE_";
-
+    
+    public Money add(Money other) {
+        return new Money(this.amount.add(other.amount));
+    }
+    
+    public Money subtract(Money other) {
+        return new Money(this.amount.subtract(other.amount));
+    }
+    
+    public boolean isPositive() {
+        return amount.compareTo(BigDecimal.ZERO) > 0;
+    }
+    
+    public void validatePositive() {
+        if (!isPositive()) {
+            throw new IllegalArgumentException("Price must be positive");
+        }
+    }
+    
+    public BigDecimal amount() { return amount; }
+    
     @Override
-    public Collection<GrantedAuthority> convert(Jwt jwt) {
-        // 合併 Realm Roles 和 Resource Roles
-        Set<GrantedAuthority> authorities = Stream.concat(
-            extractRealmRoles(jwt).stream(),
-            extractResourceRoles(jwt).stream()
-        ).collect(Collectors.toSet());
-        
-        return authorities;
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Money money)) return false;
+        return amount.compareTo(money.amount) == 0;
     }
-
-    /**
-     * 從 realm_access.roles 提取角色
-     */
-    @SuppressWarnings("unchecked")
-    private Collection<GrantedAuthority> extractRealmRoles(Jwt jwt) {
-        Map<String, Object> realmAccess = jwt.getClaimAsMap(REALM_ACCESS_CLAIM);
-        
-        if (realmAccess == null || !realmAccess.containsKey(ROLES_KEY)) {
-            return Collections.emptyList();
-        }
-        
-        List<String> roles = (List<String>) realmAccess.get(ROLES_KEY);
-        return roles.stream()
-            .filter(role -> !isDefaultRole(role))
-            .map(role -> new SimpleGrantedAuthority(ROLE_PREFIX + role.toUpperCase()))
-            .collect(Collectors.toList());
-    }
-
-    /**
-     * 從 resource_access 提取 Client Roles（可選）
-     */
-    @SuppressWarnings("unchecked")
-    private Collection<GrantedAuthority> extractResourceRoles(Jwt jwt) {
-        Map<String, Object> resourceAccess = jwt.getClaimAsMap(RESOURCE_ACCESS_CLAIM);
-        
-        if (resourceAccess == null) {
-            return Collections.emptyList();
-        }
-        
-        List<GrantedAuthority> authorities = new ArrayList<>();
-        
-        resourceAccess.forEach((clientId, clientRoles) -> {
-            if (clientRoles instanceof Map) {
-                Map<String, Object> clientRolesMap = (Map<String, Object>) clientRoles;
-                Object roles = clientRolesMap.get(ROLES_KEY);
-                
-                if (roles instanceof List) {
-                    ((List<String>) roles).forEach(role -> 
-                        authorities.add(new SimpleGrantedAuthority(
-                            ROLE_PREFIX + clientId.toUpperCase() + "_" + role.toUpperCase()
-                        ))
-                    );
-                }
-            }
-        });
-        
-        return authorities;
-    }
-
-    /**
-     * 過濾 Keycloak 預設角色
-     */
-    private boolean isDefaultRole(String role) {
-        return role.startsWith("default-roles-") || 
-               role.equals("offline_access") || 
-               role.equals("uma_authorization");
-    }
+    
+    @Override
+    public int hashCode() { return Objects.hash(amount); }
 }
 ```
 
----
-
-## 4. API 設計
-
-### 4.1 Controller 實作
+### 5.2 Domain Layer - Aggregate Root
 
 ```java
-// src/main/java/com/example/sso/controller/PublicController.java
-package com.example.sso.controller;
+// domain/model/aggregate/Product.java
+package com.example.product.domain.model.aggregate;
 
-import com.example.sso.dto.ApiResponse;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-
+import com.example.product.domain.event.*;
+import com.example.product.domain.model.valueobject.*;
 import java.time.Instant;
-import java.util.Map;
+import java.util.*;
 
-@RestController
-@RequestMapping("/api/public")
-@Tag(name = "Public", description = "公開 API，不需要認證")
-public class PublicController {
-
-    @GetMapping("/health")
-    @Operation(summary = "健康檢查", description = "回傳服務健康狀態")
-    public ApiResponse<Map<String, String>> health() {
-        return ApiResponse.success(Map.of(
-            "status", "UP",
-            "timestamp", Instant.now().toString()
-        ));
-    }
-
-    @GetMapping("/info")
-    @Operation(summary = "系統資訊", description = "回傳系統基本資訊")
-    public ApiResponse<Map<String, String>> info() {
-        return ApiResponse.success(Map.of(
-            "application", "SSO RBAC PoC API",
-            "version", "1.0.0",
-            "description", "Spring Boot API with Keycloak SSO"
-        ));
-    }
-}
-```
-
-```java
-// src/main/java/com/example/sso/controller/UserController.java
-package com.example.sso.controller;
-
-import com.example.sso.dto.ApiResponse;
-import com.example.sso.dto.ResourceDto;
-import com.example.sso.dto.UserProfileDto;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.security.SecurityRequirement;
-import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
-import java.util.Map;
-
-@RestController
-@RequestMapping("/api/user")
-@Tag(name = "User", description = "使用者 API，需要 USER 或 ADMIN 角色")
-@SecurityRequirement(name = "bearer-jwt")
-public class UserController {
-
-    @GetMapping("/profile")
-    @Operation(summary = "取得個人資料", description = "從 JWT Token 取得使用者資訊")
-    @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
-    public ApiResponse<UserProfileDto> getProfile(@AuthenticationPrincipal Jwt jwt) {
-        UserProfileDto profile = UserProfileDto.builder()
-            .username(jwt.getClaimAsString("preferred_username"))
-            .email(jwt.getClaimAsString("email"))
-            .fullName(jwt.getClaimAsString("name"))
-            .givenName(jwt.getClaimAsString("given_name"))
-            .familyName(jwt.getClaimAsString("family_name"))
-            .roles(extractRoles(jwt))
-            .tokenIssuedAt(jwt.getIssuedAt())
-            .tokenExpiresAt(jwt.getExpiresAt())
-            .build();
+/**
+ * Product Aggregate Root
+ * - 維護不變量
+ * - 封裝業務邏輯
+ * - 產生領域事件
+ */
+public class Product {
+    
+    private final ProductId id;
+    private final ProductCode productCode;  // 建立後不可變
+    private ProductName productName;
+    private Money price;
+    private Description description;
+    private ProductStatus status;
+    private AuditInfo auditInfo;
+    
+    private final List<DomainEvent> domainEvents = new ArrayList<>();
+    
+    // ===== Factory Method =====
+    public static Product create(ProductCode code, ProductName name,
+                                  Money price, Description desc, String createdBy) {
+        price.validatePositive();  // 不變量驗證
         
-        return ApiResponse.success(profile);
+        Product product = new Product(ProductId.generate(), code, name, 
+                                       price, desc, createdBy);
+        
+        product.registerEvent(new ProductCreated(
+            product.id, code, name.value(), price, createdBy, Instant.now()
+        ));
+        
+        return product;
     }
-
-    @GetMapping("/resources")
-    @Operation(summary = "取得資源列表", description = "取得使用者可存取的資源")
-    public ApiResponse<List<ResourceDto>> getResources() {
-        List<ResourceDto> resources = List.of(
-            new ResourceDto("RES-001", "Sales Report Q4", "document", "read"),
-            new ResourceDto("RES-002", "Marketing Dashboard", "dashboard", "read"),
-            new ResourceDto("RES-003", "Customer Database", "database", "read")
-        );
-        return ApiResponse.success(resources);
+    
+    private Product(ProductId id, ProductCode code, ProductName name,
+                    Money price, Description desc, String createdBy) {
+        this.id = id;
+        this.productCode = code;
+        this.productName = name;
+        this.price = price;
+        this.description = desc;
+        this.status = ProductStatus.ACTIVE;
+        this.auditInfo = AuditInfo.create(createdBy);
     }
-
-    @SuppressWarnings("unchecked")
-    private List<String> extractRoles(Jwt jwt) {
-        Map<String, Object> realmAccess = jwt.getClaimAsMap("realm_access");
-        if (realmAccess != null && realmAccess.containsKey("roles")) {
-            return ((List<String>) realmAccess.get("roles")).stream()
-                .filter(role -> !role.startsWith("default-roles-"))
-                .toList();
+    
+    // ===== Business Methods =====
+    
+    public void changePrice(Money newPrice, String changedBy) {
+        validateNotDeleted();
+        newPrice.validatePositive();
+        
+        Money oldPrice = this.price;
+        this.price = newPrice;
+        this.auditInfo = auditInfo.update(changedBy);
+        
+        registerEvent(new ProductPriceChanged(id, oldPrice, newPrice, changedBy));
+    }
+    
+    public void delete(String deletedBy) {
+        validateNotDeleted();
+        this.status = ProductStatus.DELETED;
+        this.auditInfo = auditInfo.update(deletedBy);
+        registerEvent(new ProductDeleted(id, deletedBy, Instant.now()));
+    }
+    
+    private void validateNotDeleted() {
+        if (status == ProductStatus.DELETED) {
+            throw new IllegalStateException("Cannot modify deleted product");
         }
-        return List.of();
+    }
+    
+    // ===== Domain Events =====
+    
+    protected void registerEvent(DomainEvent event) {
+        domainEvents.add(event);
+    }
+    
+    public List<DomainEvent> pullDomainEvents() {
+        List<DomainEvent> events = new ArrayList<>(domainEvents);
+        domainEvents.clear();
+        return events;
+    }
+    
+    // ===== Getters (No Setters) =====
+    public ProductId id() { return id; }
+    public ProductCode productCode() { return productCode; }
+    public ProductName productName() { return productName; }
+    public Money price() { return price; }
+    public ProductStatus status() { return status; }
+}
+```
+
+### 5.3 Domain Layer - Repository Interface
+
+```java
+// domain/repository/ProductRepository.java
+package com.example.product.domain.repository;
+
+import com.example.product.domain.model.aggregate.Product;
+import com.example.product.domain.model.valueobject.*;
+import java.util.Optional;
+
+/**
+ * Product Repository Interface (Output Port)
+ * 定義在 Domain Layer，由 Adapter Layer 實作
+ */
+public interface ProductRepository {
+    Optional<Product> findById(ProductId id);
+    Product save(Product product);
+    void delete(ProductId id);
+    boolean existsByProductCode(ProductCode code);
+}
+```
+
+### 5.4 Application Layer - Command & Query
+
+```java
+// application/port/input/command/CreateProductCommand.java
+package com.example.product.application.port.input.command;
+
+import java.math.BigDecimal;
+
+public record CreateProductCommand(
+    String productCode,
+    String productName,
+    BigDecimal price,
+    Integer quantity,
+    String description,
+    String createdBy
+) {
+    public CreateProductCommand {
+        if (productName == null || productName.isBlank())
+            throw new IllegalArgumentException("Product name required");
+        if (price == null || price.compareTo(BigDecimal.ZERO) <= 0)
+            throw new IllegalArgumentException("Price must be positive");
+    }
+}
+
+// application/port/input/query/ListProductsQuery.java
+package com.example.product.application.port.input.query;
+
+public record ListProductsQuery(
+    int page,
+    int size,
+    String sortBy,
+    String sortDirection
+) {
+    public static ListProductsQuery defaultQuery() {
+        return new ListProductsQuery(0, 20, "createdAt", "DESC");
     }
 }
 ```
 
-```java
-// src/main/java/com/example/sso/controller/AdminController.java
-package com.example.sso.controller;
+### 5.5 Application Layer - Services
 
-import com.example.sso.dto.ApiResponse;
+```java
+// application/service/ProductCommandService.java
+package com.example.product.application.service;
+
+import com.example.product.application.port.input.command.*;
+import com.example.product.application.port.output.DomainEventPublisher;
+import com.example.product.domain.model.aggregate.Product;
+import com.example.product.domain.model.valueobject.*;
+import com.example.product.domain.repository.ProductRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@Transactional
+public class ProductCommandService {
+    
+    private final ProductRepository repository;
+    private final DomainEventPublisher eventPublisher;
+    
+    public ProductCommandService(ProductRepository repository,
+                                  DomainEventPublisher eventPublisher) {
+        this.repository = repository;
+        this.eventPublisher = eventPublisher;
+    }
+    
+    public ProductId handle(CreateProductCommand cmd) {
+        ProductCode code = cmd.productCode() != null 
+            ? ProductCode.of(cmd.productCode())
+            : ProductCode.generate();
+        
+        if (repository.existsByProductCode(code)) {
+            throw new DuplicateProductCodeException(code);
+        }
+        
+        Product product = Product.create(
+            code,
+            ProductName.of(cmd.productName()),
+            Money.of(cmd.price()),
+            Description.of(cmd.description()),
+            cmd.createdBy()
+        );
+        
+        repository.save(product);
+        eventPublisher.publishAll(product.pullDomainEvents());
+        
+        return product.id();
+    }
+}
+
+// application/service/ProductQueryService.java
+package com.example.product.application.service;
+
+import com.example.product.application.dto.*;
+import com.example.product.application.port.input.query.*;
+import com.example.product.application.port.output.ProductReadRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@Transactional(readOnly = true)
+public class ProductQueryService {
+    
+    private final ProductReadRepository readRepository;
+    
+    public ProductQueryService(ProductReadRepository readRepository) {
+        this.readRepository = readRepository;
+    }
+    
+    public ProductDetailView handle(GetProductByIdQuery query) {
+        return readRepository.findDetailById(query.productId())
+            .orElseThrow(() -> new ProductNotFoundException(query.productId()));
+    }
+    
+    public PageResponse<ProductListView> handle(ListProductsQuery query) {
+        return readRepository.findAllActive(query.page(), query.size());
+    }
+}
+```
+
+### 5.6 Adapter Layer - REST Controller
+
+```java
+// adapter/inbound/rest/ProductCommandController.java
+package com.example.product.adapter.inbound.rest;
+
+import com.example.product.adapter.inbound.rest.dto.*;
+import com.example.product.application.port.input.command.*;
+import com.example.product.application.service.ProductCommandService;
+import com.example.audit.annotation.Auditable;
+import com.example.common.dto.ApiResponse;
+import com.example.security.util.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
-import java.util.Map;
+import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/admin")
-@Tag(name = "Admin", description = "管理員 API，需要 ADMIN 角色")
-@SecurityRequirement(name = "bearer-jwt")
-@PreAuthorize("hasRole('ADMIN')")
-public class AdminController {
-
-    @GetMapping("/users")
-    @Operation(summary = "取得使用者列表", description = "列出所有系統使用者")
-    public ApiResponse<List<Map<String, String>>> listUsers() {
-        List<Map<String, String>> users = List.of(
-            Map.of("id", "1", "username", "admin.user", "email", "admin@example.com", "role", "ADMIN"),
-            Map.of("id", "2", "username", "normal.user", "email", "user@example.com", "role", "USER"),
-            Map.of("id", "3", "username", "auditor.user", "email", "auditor@example.com", "role", "AUDITOR")
-        );
-        return ApiResponse.success(users);
+@RequestMapping("/api/products")
+@Tag(name = "Product Commands")
+public class ProductCommandController {
+    
+    private final ProductCommandService commandService;
+    
+    public ProductCommandController(ProductCommandService commandService) {
+        this.commandService = commandService;
     }
-
-    @GetMapping("/roles")
-    @Operation(summary = "取得角色列表", description = "列出所有可用角色")
-    public ApiResponse<List<Map<String, Object>>> listRoles() {
-        List<Map<String, Object>> roles = List.of(
-            Map.of("name", "ADMIN", "description", "系統管理員", "permissions", List.of("*")),
-            Map.of("name", "USER", "description", "一般使用者", "permissions", List.of("read:profile", "read:resources")),
-            Map.of("name", "AUDITOR", "description", "稽核人員", "permissions", List.of("read:logs", "read:reports"))
-        );
-        return ApiResponse.success(roles);
-    }
-
-    @GetMapping("/settings")
-    @Operation(summary = "取得系統設定", description = "取得系統配置資訊")
-    public ApiResponse<Map<String, Object>> getSettings() {
-        return ApiResponse.success(Map.of(
-            "maxConcurrentUsers", 100,
-            "sessionTimeout", 3600,
-            "passwordPolicy", Map.of(
-                "minLength", 8,
-                "requireUppercase", true,
-                "requireNumbers", true,
-                "requireSpecialChars", true
-            ),
-            "auditEnabled", true,
-            "features", List.of("SSO", "RBAC", "MFA", "AUDIT_LOG")
-        ));
-    }
-
-    @GetMapping("/audit-logs")
-    @Operation(summary = "取得稽核日誌", description = "查詢系統稽核記錄")
-    public ApiResponse<List<Map<String, String>>> getAuditLogs(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+    
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "建立商品")
+    @Auditable(eventType = "PRODUCT_CREATED", resourceType = "Product")
+    public ApiResponse<UUID> createProduct(@Valid @RequestBody CreateProductRequest req) {
         
-        List<Map<String, String>> logs = List.of(
-            Map.of("timestamp", "2025-01-10T10:30:00Z", "user", "admin.user", 
-                   "action", "LOGIN", "result", "SUCCESS", "ip", "192.168.1.100"),
-            Map.of("timestamp", "2025-01-10T10:31:00Z", "user", "admin.user", 
-                   "action", "VIEW_USERS", "result", "SUCCESS", "ip", "192.168.1.100"),
-            Map.of("timestamp", "2025-01-10T10:35:00Z", "user", "normal.user", 
-                   "action", "LOGIN", "result", "SUCCESS", "ip", "192.168.1.101")
+        String user = SecurityUtils.getCurrentUsername().orElse("unknown");
+        
+        CreateProductCommand cmd = new CreateProductCommand(
+            req.productCode(), req.productName(), req.price(),
+            req.quantity(), req.description(), user
         );
-        return ApiResponse.success(logs);
+        
+        var productId = commandService.handle(cmd);
+        return ApiResponse.success(productId.value(), "Product created");
+    }
+    
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("hasRole('ADMIN')")
+    @Auditable(eventType = "PRODUCT_DELETED", resourceType = "Product")
+    public void deleteProduct(@PathVariable UUID id) {
+        String user = SecurityUtils.getCurrentUsername().orElse("unknown");
+        commandService.handle(new DeleteProductCommand(id, user));
     }
 }
 ```
 
-### 4.2 DTO 類別
+### 5.7 Adapter Layer - JPA Repository
 
 ```java
-// src/main/java/com/example/sso/dto/ApiResponse.java
-package com.example.sso.dto;
+// adapter/outbound/persistence/JpaProductRepository.java
+package com.example.product.adapter.outbound.persistence;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import com.example.product.adapter.outbound.persistence.entity.*;
+import com.example.product.adapter.outbound.persistence.mapper.ProductMapper;
+import com.example.product.domain.model.aggregate.Product;
+import com.example.product.domain.model.valueobject.*;
+import com.example.product.domain.repository.ProductRepository;
+import org.springframework.stereotype.Repository;
+import java.util.Optional;
 
-import java.time.Instant;
-
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-@JsonInclude(JsonInclude.Include.NON_NULL)
-public class ApiResponse<T> {
-    private boolean success;
-    private String message;
-    private T data;
-    private String error;
-    private String timestamp;
-
-    public static <T> ApiResponse<T> success(T data) {
-        return ApiResponse.<T>builder()
-            .success(true)
-            .data(data)
-            .timestamp(Instant.now().toString())
-            .build();
+@Repository
+public class JpaProductRepository implements ProductRepository {
+    
+    private final SpringDataProductRepository jpaRepo;
+    private final ProductMapper mapper;
+    
+    public JpaProductRepository(SpringDataProductRepository jpaRepo,
+                                 ProductMapper mapper) {
+        this.jpaRepo = jpaRepo;
+        this.mapper = mapper;
     }
-
-    public static <T> ApiResponse<T> success(T data, String message) {
-        return ApiResponse.<T>builder()
-            .success(true)
-            .message(message)
-            .data(data)
-            .timestamp(Instant.now().toString())
-            .build();
+    
+    @Override
+    public Optional<Product> findById(ProductId id) {
+        return jpaRepo.findById(id.value()).map(mapper::toDomain);
     }
-
-    public static <T> ApiResponse<T> error(String error) {
-        return ApiResponse.<T>builder()
-            .success(false)
-            .error(error)
-            .timestamp(Instant.now().toString())
-            .build();
+    
+    @Override
+    public Product save(Product product) {
+        ProductJpaEntity entity = mapper.toEntity(product);
+        ProductJpaEntity saved = jpaRepo.save(entity);
+        return mapper.toDomain(saved);
     }
-
-    public static <T> ApiResponse<T> error(String error, String message) {
-        return ApiResponse.<T>builder()
-            .success(false)
-            .error(error)
-            .message(message)
-            .timestamp(Instant.now().toString())
-            .build();
+    
+    @Override
+    public boolean existsByProductCode(ProductCode code) {
+        return jpaRepo.existsByProductCode(code.value());
     }
-}
-```
-
-```java
-// src/main/java/com/example/sso/dto/UserProfileDto.java
-package com.example.sso.dto;
-
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
-import java.time.Instant;
-import java.util.List;
-
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class UserProfileDto {
-    private String username;
-    private String email;
-    private String fullName;
-    private String givenName;
-    private String familyName;
-    private List<String> roles;
-    private Instant tokenIssuedAt;
-    private Instant tokenExpiresAt;
-}
-```
-
-```java
-// src/main/java/com/example/sso/dto/ResourceDto.java
-package com.example.sso.dto;
-
-public record ResourceDto(
-    String id,
-    String name,
-    String type,
-    String permission
-) {}
-```
-
----
-
-## 5. 配置檔案
-
-### 5.1 application.yml
-
-```yaml
-# src/main/resources/application.yml
-server:
-  port: 9090
-  servlet:
-    context-path: /
-
-spring:
-  application:
-    name: sso-rbac-api
-
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          # Keycloak JWKS 端點
-          jwk-set-uri: ${KEYCLOAK_JWKS_URI:http://localhost:8080/realms/demo/protocol/openid-connect/certs}
-          # Issuer 驗證
-          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8080/realms/demo}
-
-# Actuator 配置
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,metrics
-  endpoint:
-    health:
-      show-details: when_authorized
-  info:
-    env:
-      enabled: true
-
-# OpenAPI 配置
-springdoc:
-  api-docs:
-    path: /v3/api-docs
-  swagger-ui:
-    path: /swagger-ui.html
-    operations-sorter: method
-    tags-sorter: alpha
-
-# 日誌配置
-logging:
-  level:
-    root: INFO
-    com.example.sso: DEBUG
-    org.springframework.security: DEBUG
-  pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
-```
-
-### 5.2 application-docker.yml
-
-```yaml
-# src/main/resources/application-docker.yml
-spring:
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          jwk-set-uri: http://keycloak:8080/realms/demo/protocol/openid-connect/certs
-          issuer-uri: http://keycloak:8080/realms/demo
-
-logging:
-  level:
-    root: INFO
-    com.example.sso: INFO
-    org.springframework.security: WARN
-```
-
----
-
-## 6. 例外處理
-
-```java
-// src/main/java/com/example/sso/exception/GlobalExceptionHandler.java
-package com.example.sso.exception;
-
-import com.example.sso.dto.ApiResponse;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.AccessDeniedException;
-import org.springframework.security.core.AuthenticationException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
-
-@Slf4j
-@RestControllerAdvice
-public class GlobalExceptionHandler {
-
-    @ExceptionHandler(AuthenticationException.class)
-    public ResponseEntity<ApiResponse<Void>> handleAuthenticationException(AuthenticationException ex) {
-        log.warn("Authentication failed: {}", ex.getMessage());
-        return ResponseEntity
-            .status(HttpStatus.UNAUTHORIZED)
-            .body(ApiResponse.error("UNAUTHORIZED", "認證失敗，請提供有效的 Token"));
-    }
-
-    @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<ApiResponse<Void>> handleAccessDeniedException(AccessDeniedException ex) {
-        log.warn("Access denied: {}", ex.getMessage());
-        return ResponseEntity
-            .status(HttpStatus.FORBIDDEN)
-            .body(ApiResponse.error("FORBIDDEN", "權限不足，無法存取此資源"));
-    }
-
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiResponse<Void>> handleGenericException(Exception ex) {
-        log.error("Unexpected error: ", ex);
-        return ResponseEntity
-            .status(HttpStatus.INTERNAL_SERVER_ERROR)
-            .body(ApiResponse.error("INTERNAL_ERROR", "系統發生錯誤，請稍後再試"));
+    
+    @Override
+    public void delete(ProductId id) {
+        jpaRepo.deleteById(id.value());
     }
 }
 ```
 
 ---
 
-## 7. Dockerfile
-
-```dockerfile
-# Dockerfile
-FROM eclipse-temurin:21-jdk-alpine AS builder
-
-WORKDIR /app
-
-# 複製 Maven 配置
-COPY pom.xml .
-COPY mvnw .
-COPY .mvn .mvn
-
-# 下載依賴（快取層）
-RUN ./mvnw dependency:go-offline -B
-
-# 複製原始碼並建置
-COPY src src
-RUN ./mvnw package -DskipTests -B
-
-# 執行階段
-FROM eclipse-temurin:21-jre-alpine
-
-WORKDIR /app
-
-# 建立非 root 使用者
-RUN addgroup -g 1001 appgroup && \
-    adduser -u 1001 -G appgroup -D appuser
-
-# 複製執行檔
-COPY --from=builder /app/target/*.jar app.jar
-
-# 設定權限
-RUN chown -R appuser:appgroup /app
-USER appuser
-
-# Health Check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:9090/actuator/health || exit 1
-
-EXPOSE 9090
-
-ENTRYPOINT ["java", "-jar", "app.jar"]
-```
-
----
-
-## 8. 測試策略
-
-### 8.1 單元測試範例
+## 6. 架構測試 (ArchUnit)
 
 ```java
-// src/test/java/com/example/sso/controller/UserControllerTest.java
-package com.example.sso.controller;
+// test/architecture/ArchitectureTest.java
+package com.example.product.architecture;
 
+import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.importer.ClassFileImporter;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.security.test.context.support.WithMockUser;
-import org.springframework.test.web.servlet.MockMvc;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.*;
+import static com.tngtech.archunit.library.Architectures.layeredArchitecture;
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
-
-@SpringBootTest
-@AutoConfigureMockMvc
-class UserControllerTest {
-
-    @Autowired
-    private MockMvc mockMvc;
-
-    @Test
-    void publicEndpoint_shouldBeAccessibleWithoutAuth() throws Exception {
-        mockMvc.perform(get("/api/public/health"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.success").value(true));
+class ArchitectureTest {
+    
+    private static JavaClasses classes;
+    
+    @BeforeAll
+    static void setup() {
+        classes = new ClassFileImporter()
+            .importPackages("com.example.product");
     }
-
+    
     @Test
-    void userEndpoint_withoutAuth_shouldReturn401() throws Exception {
-        mockMvc.perform(get("/api/user/resources"))
-            .andExpect(status().isUnauthorized());
+    void domainShouldNotDependOnOuterLayers() {
+        noClasses()
+            .that().resideInAPackage("..domain..")
+            .should().dependOnClassesThat()
+            .resideInAnyPackage(
+                "..application..",
+                "..adapter..",
+                "org.springframework..",
+                "jakarta.persistence.."
+            )
+            .check(classes);
     }
-
+    
     @Test
-    @WithMockUser(roles = "USER")
-    void userEndpoint_withUserRole_shouldReturn200() throws Exception {
-        mockMvc.perform(get("/api/user/resources"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.success").value(true));
+    void applicationShouldNotDependOnAdapter() {
+        noClasses()
+            .that().resideInAPackage("..application..")
+            .should().dependOnClassesThat()
+            .resideInAPackage("..adapter..")
+            .check(classes);
     }
-
+    
     @Test
-    @WithMockUser(roles = "USER")
-    void adminEndpoint_withUserRole_shouldReturn403() throws Exception {
-        mockMvc.perform(get("/api/admin/users"))
-            .andExpect(status().isForbidden());
+    void layeredArchitectureIsRespected() {
+        layeredArchitecture()
+            .consideringAllDependencies()
+            .layer("Domain").definedBy("..domain..")
+            .layer("Application").definedBy("..application..")
+            .layer("Adapter").definedBy("..adapter..")
+            .whereLayer("Domain").mayNotAccessAnyLayer()
+            .whereLayer("Application").mayOnlyAccessLayers("Domain")
+            .whereLayer("Adapter").mayOnlyAccessLayers("Domain", "Application")
+            .check(classes);
     }
-
+    
     @Test
-    @WithMockUser(roles = "ADMIN")
-    void adminEndpoint_withAdminRole_shouldReturn200() throws Exception {
-        mockMvc.perform(get("/api/admin/users"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.success").value(true));
+    void valueObjectsShouldBeFinal() {
+        classes()
+            .that().resideInAPackage("..domain.model.valueobject..")
+            .should().haveModifier(JavaModifier.FINAL)
+            .check(classes);
     }
 }
 ```
 
 ---
 
-## 9. API 文件
+## 7. Gradle 配置
 
-### 9.1 Swagger/OpenAPI 配置
+### 7.1 Root build.gradle
+
+```groovy
+// build.gradle (Root)
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.3.5' apply false
+    id 'io.spring.dependency-management' version '1.1.6' apply false
+}
+
+allprojects {
+    group = 'com.example'
+    version = '1.0.0-SNAPSHOT'
+    repositories { mavenCentral() }
+}
+
+subprojects {
+    apply plugin: 'java'
+    
+    java {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    
+    ext {
+        springCloudVersion = '2023.0.3'
+        springDocVersion = '2.5.0'
+    }
+}
+
+configure(subprojects.findAll { it.path.startsWith(':services') }) {
+    apply plugin: 'org.springframework.boot'
+    apply plugin: 'io.spring.dependency-management'
+    
+    dependencyManagement {
+        imports {
+            mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+        }
+    }
+}
+```
+
+### 7.2 Product Service build.gradle
+
+```groovy
+// services/product-service/build.gradle
+dependencies {
+    // Spring Boot
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    
+    // API Documentation
+    implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:${springDocVersion}"
+    
+    // Shared Libraries
+    implementation project(':libs:common-lib')
+    implementation project(':libs:audit-lib')
+    implementation project(':libs:security-lib')
+    
+    // Database
+    runtimeOnly 'com.h2database:h2'
+    runtimeOnly 'org.postgresql:postgresql'
+    
+    // Testing
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation 'com.tngtech.archunit:archunit-junit5:1.2.1'
+}
+```
+
+---
+
+## 8. CQRS 資料流
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              CQRS Data Flow                                      │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  COMMAND FLOW (Write):                                                          │
+│  ════════════════════                                                           │
+│                                                                                  │
+│  HTTP Request                                                                   │
+│       │                                                                         │
+│       ▼                                                                         │
+│  ┌─────────────────────┐                                                       │
+│  │ CommandController   │  ← Adapter (Inbound)                                  │
+│  │ • Validate Request  │                                                       │
+│  │ • Create Command    │                                                       │
+│  └──────────┬──────────┘                                                       │
+│             │                                                                   │
+│             ▼                                                                   │
+│  ┌─────────────────────┐                                                       │
+│  │ CommandService      │  ← Application                                        │
+│  │ • Load Aggregate    │                                                       │
+│  │ • Execute Command   │                                                       │
+│  │ • Save Aggregate    │                                                       │
+│  │ • Publish Events    │                                                       │
+│  └──────────┬──────────┘                                                       │
+│             │                                                                   │
+│             ▼                                                                   │
+│  ┌─────────────────────┐                                                       │
+│  │ Aggregate           │  ← Domain                                             │
+│  │ • Validate Rules    │                                                       │
+│  │ • Update State      │                                                       │
+│  │ • Register Events   │                                                       │
+│  └──────────┬──────────┘                                                       │
+│             │                                                                   │
+│             ▼                                                                   │
+│  ┌─────────────────────┐                                                       │
+│  │ JpaRepository       │  ← Adapter (Outbound)                                 │
+│  │ • Map to Entity     │                                                       │
+│  │ • Persist           │                                                       │
+│  └─────────────────────┘                                                       │
+│                                                                                  │
+│                                                                                  │
+│  QUERY FLOW (Read):                                                             │
+│  ══════════════════                                                             │
+│                                                                                  │
+│  HTTP Request                                                                   │
+│       │                                                                         │
+│       ▼                                                                         │
+│  ┌─────────────────────┐                                                       │
+│  │ QueryController     │  ← Adapter (Inbound)                                  │
+│  │ • Create Query      │                                                       │
+│  └──────────┬──────────┘                                                       │
+│             │                                                                   │
+│             ▼                                                                   │
+│  ┌─────────────────────┐                                                       │
+│  │ QueryService        │  ← Application                                        │
+│  │ • Execute Query     │     (不經過 Domain)                                   │
+│  └──────────┬──────────┘                                                       │
+│             │                                                                   │
+│             ▼                                                                   │
+│  ┌─────────────────────┐                                                       │
+│  │ ReadRepository      │  ← Adapter (Outbound)                                 │
+│  │ • Query Database    │                                                       │
+│  │ • Return View/DTO   │                                                       │
+│  └─────────────────────┘                                                       │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 9. 共用稽核函式庫 (audit-lib)
+
+### 9.1 架構設計
+
+稽核函式庫採用 AOP（Aspect-Oriented Programming）機制，與業務邏輯完全分離：
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          Audit Library Architecture                              │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │                        Microservice (user-service, product-service)      │   │
+│  │                                                                          │   │
+│  │   ┌───────────────────┐      ┌───────────────────┐                      │   │
+│  │   │  Business Logic   │      │  @Auditable       │                      │   │
+│  │   │  (Application     │ ────▶│  Annotation       │                      │   │
+│  │   │   Service)        │      │                   │                      │   │
+│  │   └───────────────────┘      └─────────┬─────────┘                      │   │
+│  │                                         │                                │   │
+│  └─────────────────────────────────────────┼────────────────────────────────┘   │
+│                                            │                                     │
+│  ┌─────────────────────────────────────────┼────────────────────────────────┐   │
+│  │                          audit-lib (Shared Library)                       │   │
+│  │                                         │                                │   │
+│  │                                         ▼                                │   │
+│  │   ┌─────────────────────────────────────────────────────────────────┐   │   │
+│  │   │                      AuditAspect (AOP)                          │   │   │
+│  │   │  • @Around("@annotation(Auditable)")                            │   │   │
+│  │   │  • Extract method context                                       │   │   │
+│  │   │  • Build AuditLog entity                                        │   │   │
+│  │   │  • Handle success/failure                                       │   │   │
+│  │   └────────────────────────────────┬────────────────────────────────┘   │   │
+│  │                                    │                                    │   │
+│  │                 ┌──────────────────┴──────────────────┐                 │   │
+│  │                 │                                     │                 │   │
+│  │                 ▼                                     ▼                 │   │
+│  │   ┌─────────────────────────────┐   ┌─────────────────────────────┐   │   │
+│  │   │    PayloadProcessor        │   │    AuditLogRepository       │   │   │
+│  │   │  • Serialize payload       │   │    (Output Port)            │   │   │
+│  │   │  • Truncate if > 64KB      │   │  • save(AuditLog)           │   │   │
+│  │   │  • Mask sensitive fields   │   │  • Append-only semantics    │   │   │
+│  │   │  • Handle circular refs    │   └──────────────┬──────────────┘   │   │
+│  │   └─────────────────────────────┘                  │                  │   │
+│  │                                                    │                  │   │
+│  │   ┌─────────────────────────────┐                  │                  │   │
+│  │   │    AuditMetrics             │                  │                  │   │
+│  │   │  • audit.events.total       │                  │                  │   │
+│  │   │  • audit.events.failed      │                  │                  │   │
+│  │   │  • audit.capture.latency    │                  │                  │   │
+│  │   │  • audit.queue.depth        │                  │                  │   │
+│  │   └─────────────────────────────┘                  │                  │   │
+│  │                                                    │                  │   │
+│  └────────────────────────────────────────────────────┼──────────────────┘   │
+│                                                       │                       │
+│  ┌────────────────────────────────────────────────────┼──────────────────┐   │
+│  │                     Infrastructure (Adapter)        │                  │   │
+│  │                                                     ▼                  │   │
+│  │   ┌─────────────────────────────────────────────────────────────────┐│   │
+│  │   │  JpaAuditLogRepository (Append-Only Implementation)             ││   │
+│  │   │  • INSERT only (no UPDATE/DELETE methods exposed)               ││   │
+│  │   │  • Database constraint: no update/delete triggers               ││   │
+│  │   └─────────────────────────────────────────────────────────────────┘│   │
+│  │                                                                       │   │
+│  └───────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 9.2 核心元件
+
+#### 9.2.1 @Auditable 註解
 
 ```java
-// src/main/java/com/example/sso/config/OpenApiConfig.java
-package com.example.sso.config;
+// libs/audit-lib/src/main/java/com/example/audit/annotation/Auditable.java
+package com.example.audit.annotation;
 
-import io.swagger.v3.oas.models.Components;
-import io.swagger.v3.oas.models.OpenAPI;
-import io.swagger.v3.oas.models.info.Contact;
-import io.swagger.v3.oas.models.info.Info;
-import io.swagger.v3.oas.models.security.SecurityScheme;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import java.lang.annotation.*;
+
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+public @interface Auditable {
+
+    /** 稽核事件類型 (e.g., PRODUCT_CREATED) */
+    String eventType();
+
+    /** 資源類型 (e.g., Product, User) */
+    String resourceType();
+
+    /** 需遮蔽的欄位名稱 */
+    String[] maskFields() default {};
+
+    /** 自訂 Payload 擷取器（SpEL 表達式） */
+    String payloadExpression() default "";
+}
+```
+
+#### 9.2.2 AuditAspect
+
+```java
+// libs/audit-lib/src/main/java/com/example/audit/aspect/AuditAspect.java
+package com.example.audit.aspect;
+
+@Aspect
+@Component
+@Order(Ordered.LOWEST_PRECEDENCE - 10)  // 在交易提交後執行
+public class AuditAspect {
+
+    private final AuditLogRepository repository;
+    private final PayloadProcessor payloadProcessor;
+    private final AuditMetrics metrics;
+    private final AuditContextHolder contextHolder;
+
+    @Around("@annotation(auditable)")
+    public Object audit(ProceedingJoinPoint pjp, Auditable auditable) throws Throwable {
+        long startTime = System.currentTimeMillis();
+        Object result = null;
+        Throwable error = null;
+
+        try {
+            result = pjp.proceed();
+            return result;
+        } catch (Throwable t) {
+            error = t;
+            throw t;
+        } finally {
+            try {
+                captureAuditLog(pjp, auditable, result, error, startTime);
+            } catch (Exception e) {
+                // 稽核失敗不影響業務操作
+                metrics.incrementFailed();
+                log.error("Audit capture failed", e);
+            }
+        }
+    }
+
+    private void captureAuditLog(ProceedingJoinPoint pjp, Auditable auditable,
+                                  Object result, Throwable error, long startTime) {
+
+        AuditLog log = AuditLog.builder()
+            .id(UUID.randomUUID())
+            .timestamp(Instant.now())
+            .eventType(auditable.eventType())
+            .aggregateType(auditable.resourceType())
+            .aggregateId(extractAggregateId(pjp, result))
+            .username(contextHolder.getCurrentUsername().orElse("ANONYMOUS"))
+            .serviceName(contextHolder.getServiceName())
+            .action(pjp.getSignature().getName())
+            .payload(payloadProcessor.process(pjp.getArgs(), auditable.maskFields()))
+            .result(error == null ? "SUCCESS" : "FAILURE")
+            .errorMessage(error != null ? error.getMessage() : null)
+            .clientIp(contextHolder.getClientIp().orElse("unknown"))
+            .build();
+
+        repository.save(log);
+
+        long latency = System.currentTimeMillis() - startTime;
+        metrics.recordLatency(latency);
+        metrics.incrementTotal();
+    }
+}
+```
+
+#### 9.2.3 PayloadProcessor
+
+```java
+// libs/audit-lib/src/main/java/com/example/audit/processor/PayloadProcessor.java
+package com.example.audit.processor;
+
+@Component
+public class PayloadProcessor {
+
+    private static final int MAX_PAYLOAD_SIZE = 64 * 1024;  // 64 KB
+    private final ObjectMapper objectMapper;
+    private final List<FieldMasker> maskers;
+
+    public String process(Object[] args, String[] maskFields) {
+        try {
+            Map<String, Object> payload = buildPayloadMap(args);
+
+            // 遮蔽敏感欄位
+            for (String field : maskFields) {
+                maskField(payload, field);
+            }
+
+            String json = objectMapper.writeValueAsString(payload);
+
+            // 截斷超大 Payload
+            if (json.length() > MAX_PAYLOAD_SIZE) {
+                return truncatePayload(json, payload);
+            }
+
+            return json;
+        } catch (Exception e) {
+            return "{\"_error\": \"payload serialization failed\"}";
+        }
+    }
+
+    private void maskField(Map<String, Object> payload, String fieldPath) {
+        // 支援巢狀路徑：user.password, payment.card.number
+        String[] parts = fieldPath.split("\\.");
+        maskFieldRecursive(payload, parts, 0);
+    }
+
+    private String truncatePayload(String json, Map<String, Object> original) {
+        Map<String, Object> truncated = new LinkedHashMap<>();
+        truncated.put("_truncated", true);
+        truncated.put("_originalSize", json.length());
+        truncated.put("_summary", extractSummary(original));
+        return objectMapper.writeValueAsString(truncated);
+    }
+}
+```
+
+### 9.3 函式庫整合
+
+#### 9.3.1 Gradle 依賴
+
+```groovy
+// services/product-service/build.gradle
+dependencies {
+    implementation project(':libs:audit-lib')
+}
+
+// libs/audit-lib/build.gradle
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-aop'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.micrometer:micrometer-core'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+}
+```
+
+#### 9.3.2 自動配置
+
+```java
+// libs/audit-lib/src/main/java/com/example/audit/config/AuditAutoConfiguration.java
+package com.example.audit.config;
 
 @Configuration
-public class OpenApiConfig {
+@EnableAspectJAutoProxy
+@ConditionalOnProperty(name = "audit.enabled", havingValue = "true", matchIfMissing = true)
+public class AuditAutoConfiguration {
 
     @Bean
-    public OpenAPI customOpenAPI() {
-        return new OpenAPI()
-            .info(new Info()
-                .title("SSO RBAC PoC API")
-                .version("1.0.0")
-                .description("Spring Boot API with Keycloak SSO and Role-Based Access Control")
-                .contact(new Contact()
-                    .name("Architecture Team")
-                    .email("arch@example.com")))
-            .components(new Components()
-                .addSecuritySchemes("bearer-jwt", new SecurityScheme()
-                    .type(SecurityScheme.Type.HTTP)
-                    .scheme("bearer")
-                    .bearerFormat("JWT")
-                    .description("輸入從 Keycloak 取得的 JWT Access Token")));
+    @ConditionalOnMissingBean
+    public AuditAspect auditAspect(AuditLogRepository repository,
+                                    PayloadProcessor processor,
+                                    AuditMetrics metrics) {
+        return new AuditAspect(repository, processor, metrics);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AuditMetrics auditMetrics(MeterRegistry registry) {
+        return new AuditMetrics(registry);
+    }
+
+    @Bean
+    public HealthIndicator auditHealthIndicator(AuditLogRepository repository) {
+        return new AuditHealthIndicator(repository);
     }
 }
 ```
 
-### 9.2 API 端點總覽
+#### 9.3.3 應用程式配置
 
-| Method | Endpoint | 說明 | 權限 |
-|--------|----------|------|------|
-| GET | `/api/public/health` | 健康檢查 | 公開 |
-| GET | `/api/public/info` | 系統資訊 | 公開 |
-| GET | `/api/user/profile` | 個人資料 | USER, ADMIN |
-| GET | `/api/user/resources` | 資源列表 | USER, ADMIN |
-| GET | `/api/admin/users` | 使用者列表 | ADMIN |
-| GET | `/api/admin/roles` | 角色列表 | ADMIN |
-| GET | `/api/admin/settings` | 系統設定 | ADMIN |
-| GET | `/api/admin/audit-logs` | 稽核日誌 | ADMIN |
+```yaml
+# application.yml
+audit:
+  enabled: true
+  service-name: ${spring.application.name}
+  payload:
+    max-size: 65536  # 64 KB
+  async:
+    enabled: true
+    queue-capacity: 1000
+  masking:
+    default-fields:
+      - password
+      - secret
+      - token
+```
+
+### 9.4 效能設計
+
+| 設計決策 | 說明 |
+|----------|------|
+| **非同步處理** | 稽核日誌寫入採用非同步佇列，不阻塞業務執行緒 |
+| **批次寫入** | 支援批次寫入以提高吞吐量（可配置） |
+| **故障隔離** | 稽核失敗只記錄錯誤日誌，不拋出異常 |
+| **連線池** | 使用獨立的資料庫連線池，避免影響業務查詢 |
+| **指標暴露** | 透過 Micrometer 暴露監控指標至 Prometheus |
+
+### 9.5 專案結構
+
+```
+libs/audit-lib/
+├── build.gradle
+└── src/main/java/com/example/audit/
+    ├── annotation/
+    │   └── Auditable.java
+    ├── aspect/
+    │   └── AuditAspect.java
+    ├── config/
+    │   └── AuditAutoConfiguration.java
+    ├── domain/
+    │   └── AuditLog.java
+    ├── metrics/
+    │   └── AuditMetrics.java
+    ├── processor/
+    │   ├── PayloadProcessor.java
+    │   └── FieldMasker.java
+    ├── repository/
+    │   └── AuditLogRepository.java        # Output Port (Interface)
+    └── health/
+        └── AuditHealthIndicator.java
+```
 
 ---
 
-## 10. 部署檢查清單
+## 10. 附錄
 
-### 10.1 開發環境
+### 10.1 相關文件
 
-- [ ] JDK 21 已安裝
-- [ ] Maven 3.9+ 已安裝
-- [ ] IDE 已配置 Lombok 支援
-- [ ] Keycloak 服務可存取
+- [PRD.md](./PRD.md) - 業務需求與領域建模
+- [INFRA.md](./INFRA.md) - 基礎設施與部署
 
-### 10.2 Docker 環境
+### 10.2 參考資料
 
-- [ ] Docker 24+ 已安裝
-- [ ] Docker Compose v2 已安裝
-- [ ] 網路配置正確（sso-network）
-- [ ] 環境變數已設定
-
-### 10.3 安全檢查
-
-- [ ] JWT 簽章驗證正常
-- [ ] RBAC 權限控制正確
-- [ ] 敏感端點已保護
-- [ ] CORS 配置適當
+- [Hexagonal Architecture by Alistair Cockburn](https://alistair.cockburn.us/hexagonal-architecture/)
+- [Domain-Driven Design by Eric Evans](https://www.domainlanguage.com/ddd/)
+- [CQRS by Martin Fowler](https://martinfowler.com/bliki/CQRS.html)
