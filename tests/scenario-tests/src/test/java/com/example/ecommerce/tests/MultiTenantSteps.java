@@ -2,6 +2,7 @@ package com.example.ecommerce.tests;
 
 import io.cucumber.datatable.DataTable;
 import io.cucumber.java.zh_tw.*;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.*;
 
@@ -10,13 +11,15 @@ import java.util.*;
  */
 public class MultiTenantSteps {
 
+    @Autowired
+    private TestContext testContext;
+
     private Map<String, List<String>> tenantProducts = new HashMap<>();
-    private String currentTenant;
     private List<String> lastQueryResults = new ArrayList<>();
-    private int lastResponseCode;
 
     @假設("系統中存在兩個租戶:")
     public void 系統中存在兩個租戶(DataTable dataTable) {
+        tenantProducts.clear();
         List<Map<String, String>> tenants = dataTable.asMaps();
         for (Map<String, String> tenant : tenants) {
             String tenantId = tenant.get("租戶 ID");
@@ -46,24 +49,24 @@ public class MultiTenantSteps {
 
     @當("租戶 {string} 的使用者查詢商品列表")
     public void 租戶使用者查詢商品列表(String tenantId) {
-        currentTenant = tenantId;
+        testContext.setCurrentTenant(tenantId);
         lastQueryResults = new ArrayList<>(tenantProducts.getOrDefault(tenantId, Collections.emptyList()));
-        lastResponseCode = 200;
+        testContext.setLastResponseCode(200);
     }
 
     @當("系統管理員查詢所有商品")
     public void 系統管理員查詢所有商品() {
-        currentTenant = "system";
+        testContext.setCurrentTenant("system");
         lastQueryResults = new ArrayList<>();
         for (List<String> products : tenantProducts.values()) {
             lastQueryResults.addAll(products);
         }
-        lastResponseCode = 200;
+        testContext.setLastResponseCode(200);
     }
 
     @當("租戶 {string} 的使用者嘗試存取商品 {string}")
     public void 租戶使用者嘗試存取商品(String tenantId, String productId) {
-        currentTenant = tenantId;
+        testContext.setCurrentTenant(tenantId);
         boolean found = false;
         for (String product : tenantProducts.getOrDefault(tenantId, Collections.emptyList())) {
             if (product.contains(productId)) {
@@ -71,7 +74,7 @@ public class MultiTenantSteps {
                 break;
             }
         }
-        lastResponseCode = found ? 200 : 404;
+        testContext.setLastResponseCode(found ? 200 : 404);
     }
 
     @那麼("只應看到屬於 {string} 的商品")
@@ -101,6 +104,7 @@ public class MultiTenantSteps {
 
     @那麼("系統應回傳資源不存在錯誤")
     public void 系統應回傳資源不存在錯誤() {
-        assert lastResponseCode == 404 : "Expected 404, but got: " + lastResponseCode;
+        int code = testContext.getLastResponseCode();
+        assert code == 404 : "Expected 404, but got: " + code;
     }
 }

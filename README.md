@@ -1,681 +1,838 @@
 # RBAC-SSO-POC
 
-基於 Hexagonal Architecture 的 RBAC + SSO 概念驗證專案，包含共用稽核函式庫功能。
+多租戶電子商務平台 POC - 基於 Hexagonal Architecture 的 RBAC + SSO 實作，整合 Keycloak LDAP 認證與稽核功能。
 
 ## 目錄
 
 - [專案概述](#專案概述)
-- [技術堆疊](#技術堆疊)
 - [系統架構](#系統架構)
-- [ER Diagram](#er-diagram)
-- [API 文件](#api-文件)
+- [RBAC 權限控制](#rbac-權限控制)
+- [Keycloak LDAP 整合教學](#keycloak-ldap-整合教學)
+- [微服務說明](#微服務說明)
+- [UML 圖表](#uml-圖表)
 - [快速開始](#快速開始)
-- [測試範例資料](#測試範例資料)
+- [測試](#測試)
 - [專案結構](#專案結構)
 
 ## 專案概述
 
-本專案實作共用稽核函式庫 (Shared Audit Library)，提供兩種稽核機制：
-
-1. **AOP (Aspect-Oriented Programming)**：透過 `@Auditable` annotation 自動攔截方法
-2. **Domain Event**：透過領域事件發布，提供更靈活的稽核控制
-
-函式庫可供不同微服務引用，提供宣告式和程式化的稽核記錄功能。
-
-### 分支說明
-
-| 分支 | 說明 |
-|------|------|
-| `main` | 主分支，包含 AOP 與 Domain Event 雙機制 |
-| `domain-event-for-audit` | Domain Event 稽核機制開發分支 |
+本專案實作多租戶電子商務平台的核心功能，展示以下技術概念：
 
 ### 核心特性
 
-- **雙重稽核機制**：支援 AOP 註解式與 Domain Event 程式化兩種方式
-- **宣告式稽核**：透過 `@Auditable` annotation 標註需要稽核的方法
-- **程式化稽核**：透過 `AuditEventPublisher` 發布稽核事件
-- **業務邏輯隔離**：稽核失敗不會影響業務操作 (FR-005)
-- **自動資訊擷取**：自動記錄操作者、時間戳記、Client IP、執行結果
-- **敏感資料遮罩**：支援欄位級別的資料遮罩
-- **可觀測性**：整合 Micrometer 提供 metrics 與 health indicators
-- **OAuth2 安全性**：支援 North-South 與 East-West 安全控制
-- **Spring Cloud Contract**：提供消費者驅動合約測試
+| 特性 | 說明 |
+|------|------|
+| **多租戶架構** | 租戶資料隔離，TenantContext 管理 |
+| **RBAC 權限控制** | 基於角色的存取控制，整合 Spring Security |
+| **SSO 單一登入** | OAuth2/OIDC + Keycloak 整合 |
+| **Hexagonal Architecture** | 六角架構，Ports & Adapters 模式 |
+| **DDD 領域驅動設計** | Aggregate、Value Objects、Domain Events |
+| **CQRS 模式** | 命令/查詢分離 |
+| **稽核日誌** | Spring AOP / Domain Event 雙機制 |
 
-## 技術堆疊
+### 分支說明
 
-| 類別 | 技術 | 版本 |
-|------|------|------|
-| 語言 | Java | 17 (LTS) |
-| 框架 | Spring Boot | 3.3.x |
-| AOP | Spring AOP | 6.1.x |
-| 事件 | Spring Events | 6.1.x |
-| 資料存取 | Spring Data JPA | 3.3.x |
-| 安全性 | Spring Security OAuth2 | 6.x |
-| 監控 | Micrometer | 1.12.x |
-| 資料庫 | H2 (Dev) / PostgreSQL (Prod) | - |
-| 測試 | JUnit 5, ArchUnit | 1.2.x |
-| 合約測試 | Spring Cloud Contract | 4.1.x |
-| 建置 | Gradle | 8.5 |
+| 分支 | 稽核機制 | 說明 |
+|------|----------|------|
+| `main` | Spring AOP | 透過 `@Auditable` 註解自動攔截，適合簡單場景 |
+| `domain-event-for-audit` | Domain Event | 透過領域事件發布，提供更細緻的控制 |
+
+> 兩個分支的 RBAC、SSO、多租戶等核心功能完全一致，僅稽核日誌實作方式不同。
 
 ## 系統架構
 
-### 整體架構圖
+### 整體架構
 
 ```mermaid
 flowchart TB
-    subgraph Services["Microservices"]
-        PS[Product Service<br/>@Auditable]
-        US[User Service<br/>@Auditable]
-        OS[Order Service<br/>@Auditable]
+    subgraph Client["Client Layer"]
+        WEB[Web Browser]
+        MOBILE[Mobile App]
     end
 
-    subgraph AuditLib["libs/audit-lib"]
-        AA[AuditAspect<br/>AOP Interceptor]
-        AR[AuditLogRepository<br/>Output Port]
+    subgraph Gateway["API Gateway Layer"]
+        GW[Gateway Service<br/>:8080]
     end
 
-    subgraph Storage["Database"]
-        DB[(audit_logs<br/>PostgreSQL/H2<br/>Append-Only)]
+    subgraph Auth["Authentication"]
+        KC[Keycloak<br/>:8180]
+        LDAP[(LDAP Server)]
     end
 
-    PS --> AA
-    US --> AA
-    OS --> AA
-    AA --> AR
-    AR --> DB
+    subgraph Services["Microservices Layer"]
+        PS[Product Service<br/>:8081]
+        US[User Service<br/>:8082]
+    end
+
+    subgraph SharedLibs["Shared Libraries"]
+        SL[security-lib]
+        TL[tenant-lib]
+        AL[audit-lib]
+        CL[common-lib]
+    end
+
+    subgraph Data["Data Layer"]
+        DB[(PostgreSQL/H2)]
+    end
+
+    WEB --> GW
+    MOBILE --> GW
+    GW -->|JWT| PS
+    GW -->|JWT| US
+    GW <-->|OAuth2| KC
+    KC <-->|LDAP Bind| LDAP
+    PS --> DB
+    US --> DB
+    PS -.-> SL
+    PS -.-> TL
+    PS -.-> AL
+    US -.-> SL
+    US -.-> TL
 ```
 
-### Hexagonal Architecture (Audit Library 內部)
+### Hexagonal Architecture (Product Service)
 
 ```mermaid
 flowchart TB
+    subgraph Adapters["ADAPTERS (Infrastructure Layer)"]
+        subgraph Inbound["Inbound Adapters"]
+            REST[REST Controller<br/>ProductCommandController<br/>ProductQueryController]
+        end
+
+        subgraph Outbound["Outbound Adapters"]
+            JPA[JPA Repository<br/>JpaProductRepository]
+            EVENT[Event Publisher]
+        end
+    end
+
+    subgraph Application["APPLICATION LAYER"]
+        CMD[ProductCommandService<br/>CreateProduct, UpdateProduct, DeleteProduct]
+        QRY[ProductQueryService<br/>GetProductById, ListProducts]
+    end
+
     subgraph Domain["DOMAIN LAYER"]
-        AL[AuditLog<br/>Aggregate Root]
-        AET[AuditEventType<br/>Value Object]
-        ARR[AuditResult<br/>Enum]
-        ARP[/"AuditLogRepository<br/>«interface»<br/>Output Port"/]
+        AGG[Product Aggregate]
+        VO[Value Objects<br/>ProductId, ProductCode, Money, ProductStatus]
+        DE[Domain Events<br/>ProductCreated, ProductUpdated, etc.]
+        REPO[/"ProductRepository<br/>«interface»<br/>Output Port"/]
     end
 
-    subgraph Infra["INFRASTRUCTURE LAYER"]
-        ASP[AuditAspect<br/>Spring AOP]
-        PP[PayloadProcessor<br/>Serialization]
-        JPA[JpaAuditLogRepository<br/>JPA Adapter]
-        ACH[AuditContextHolder<br/>Thread-local]
-        AM[AuditMetrics<br/>Micrometer]
-        AAC[AuditAutoConfiguration<br/>Spring Boot]
-    end
-
-    JPA -.->|implements| ARP
-    ASP --> PP
-    ASP --> ACH
-    ASP --> AL
-    JPA --> AL
+    REST -->|Commands| CMD
+    REST -->|Queries| QRY
+    CMD --> AGG
+    QRY --> AGG
+    CMD --> REPO
+    QRY --> REPO
+    AGG --> VO
+    AGG --> DE
+    JPA -.->|implements| REPO
 ```
 
-### 資料流程
+## RBAC 權限控制
+
+### 角色定義
 
 ```mermaid
-flowchart TD
-    BO[Business Operation] --> AUD["@Auditable Annotation"]
-    AUD --> ASP[AuditAspect<br/>Intercept]
-    ASP --> PP[PayloadProcessor<br/>Serialize/Mask]
-    ASP --> ACH[AuditContextHolder<br/>username, clientIp, correlationId]
+graph TB
+    subgraph Roles["角色層級"]
+        ADMIN[ADMIN<br/>系統管理員]
+        TENANT_ADMIN[TENANT_ADMIN<br/>租戶管理員]
+        USER[USER<br/>一般使用者]
+        VIEWER[VIEWER<br/>唯讀使用者]
+    end
 
-    PP --> BLD[AuditLog.builder<br/>Domain Entity Creation]
-    ACH --> BLD
+    subgraph Permissions["權限"]
+        P1[商品管理 CRUD]
+        P2[使用者管理]
+        P3[商品新增/編輯]
+        P4[商品查看]
+    end
 
-    BLD --> REPO[AuditLogRepository.save<br/>Output Port]
-    REPO --> DB[(audit_logs table)]
+    ADMIN --> P1
+    ADMIN --> P2
+    TENANT_ADMIN --> P3
+    TENANT_ADMIN --> P4
+    USER --> P4
+    VIEWER --> P4
 ```
 
-### 元件互動時序圖
+### 權限對照表
+
+| 端點 | ADMIN | TENANT_ADMIN | USER | VIEWER |
+|------|:-----:|:------------:|:----:|:------:|
+| `GET /api/products` | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/products/{id}` | ✅ | ✅ | ✅ | ✅ |
+| `POST /api/products` | ✅ | ✅ | ❌ | ❌ |
+| `PUT /api/products/{id}` | ✅ | ✅ | ❌ | ❌ |
+| `DELETE /api/products/{id}` | ✅ | ❌ | ❌ | ❌ |
+| `GET /api/admin/users` | ✅ | ❌ | ❌ | ❌ |
+
+### Spring Security 設定
+
+```java
+@PreAuthorize("hasAnyRole('ADMIN', 'TENANT_ADMIN')")
+@PostMapping
+public ApiResponse<UUID> createProduct(@RequestBody CreateProductRequest req) {
+    // ...
+}
+
+@PreAuthorize("hasRole('ADMIN')")
+@DeleteMapping("/{id}")
+public ApiResponse<Void> deleteProduct(@PathVariable UUID id) {
+    // ...
+}
+```
+
+## Keycloak LDAP 整合教學
+
+### 架構概覽
 
 ```mermaid
 sequenceDiagram
-    participant Client
-    participant Controller
-    participant AuditAspect
-    participant BusinessLogic
-    participant PayloadProcessor
-    participant AuditLogRepository
-    participant Database
+    participant User
+    participant App as Application
+    participant KC as Keycloak
+    participant LDAP as LDAP Server
 
-    Client->>Controller: HTTP Request
-    Controller->>AuditAspect: @Auditable method call
-    AuditAspect->>BusinessLogic: proceed()
-    BusinessLogic-->>AuditAspect: result/exception
-    AuditAspect->>PayloadProcessor: serialize & mask payload
-    PayloadProcessor-->>AuditAspect: processed payload
-    AuditAspect->>AuditLogRepository: save(auditLog)
-    AuditLogRepository->>Database: INSERT
-    AuditAspect-->>Controller: return result
-    Controller-->>Client: HTTP Response
+    User->>App: 1. 存取受保護資源
+    App->>User: 2. 重導向至 Keycloak
+    User->>KC: 3. 輸入帳號密碼
+    KC->>LDAP: 4. LDAP Bind 驗證
+    LDAP-->>KC: 5. 驗證成功
+    KC->>KC: 6. 產生 JWT Token
+    KC-->>User: 7. 回傳 Token
+    User->>App: 8. 帶 Token 存取資源
+    App->>App: 9. 驗證 Token 並授權
+    App-->>User: 10. 回傳資料
 ```
 
-## ER Diagram
+### Step 1: 安裝 Keycloak
 
-### 資料模型
+```bash
+# 使用 Docker 啟動 Keycloak
+docker run -d --name keycloak \
+  -p 8180:8080 \
+  -e KEYCLOAK_ADMIN=admin \
+  -e KEYCLOAK_ADMIN_PASSWORD=admin \
+  quay.io/keycloak/keycloak:23.0 start-dev
+```
 
-```mermaid
-erDiagram
-    AUDIT_LOGS {
-        UUID id PK "Primary Key"
-        TIMESTAMP timestamp "NOT NULL"
-        VARCHAR(100) event_type "NOT NULL"
-        VARCHAR(100) aggregate_type "NOT NULL"
-        VARCHAR(255) aggregate_id "NULLABLE"
-        VARCHAR(100) username "NOT NULL DEFAULT 'ANONYMOUS'"
-        VARCHAR(100) service_name "NOT NULL"
-        VARCHAR(255) action "NULLABLE"
-        TEXT payload "NULLABLE, max 64KB"
-        VARCHAR(20) result "NOT NULL, CHECK (SUCCESS|FAILURE)"
-        TEXT error_message "NULLABLE"
-        VARCHAR(45) client_ip "NULLABLE"
-        VARCHAR(100) correlation_id "NULLABLE"
-        BOOLEAN payload_truncated "NOT NULL DEFAULT FALSE"
+### Step 2: 建立 Realm
+
+1. 登入 Keycloak Admin Console: `http://localhost:8180/admin`
+2. 建立新 Realm: `ecommerce`
+
+### Step 3: 設定 LDAP User Federation
+
+1. 進入 **User Federation** > **Add provider** > **ldap**
+2. 填入以下設定：
+
+| 設定項 | 值 |
+|--------|-----|
+| Vendor | Other |
+| Connection URL | `ldap://ldap-server:389` |
+| Bind DN | `cn=admin,dc=example,dc=com` |
+| Bind Credential | (管理員密碼) |
+| Users DN | `ou=users,dc=example,dc=com` |
+| Username LDAP attribute | `uid` |
+| UUID LDAP attribute | `entryUUID` |
+| User Object Classes | `inetOrgPerson, organizationalPerson` |
+
+### Step 4: 設定 LDAP Mapper (角色同步)
+
+1. 在 LDAP 設定頁面 > **Mappers** > **Create**
+2. 建立 Group Mapper：
+
+| 設定項 | 值 |
+|--------|-----|
+| Name | `ldap-group-mapper` |
+| Mapper Type | `group-ldap-mapper` |
+| LDAP Groups DN | `ou=groups,dc=example,dc=com` |
+| Group Object Classes | `groupOfNames` |
+| Membership LDAP Attribute | `member` |
+| Mode | `READ_ONLY` |
+
+### Step 5: 建立 Client
+
+1. 進入 **Clients** > **Create client**
+2. 設定：
+
+| 設定項 | 值 |
+|--------|-----|
+| Client ID | `ecommerce-app` |
+| Client Protocol | `openid-connect` |
+| Access Type | `confidential` |
+| Valid Redirect URIs | `http://localhost:8080/*` |
+
+### Step 6: 設定 Tenant Mapper (Custom Claim)
+
+建立 Protocol Mapper 將租戶 ID 加入 Token：
+
+1. **Clients** > `ecommerce-app` > **Client scopes** > **Dedicated scope**
+2. **Add mapper** > **By configuration** > **User Attribute**
+
+| 設定項 | 值 |
+|--------|-----|
+| Name | `tenant_id` |
+| User Attribute | `tenant_id` |
+| Token Claim Name | `tenant_id` |
+| Claim JSON Type | `String` |
+| Add to ID token | ✅ |
+| Add to access token | ✅ |
+
+### Step 7: 應用程式設定
+
+```yaml
+# application.yml
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:8180/realms/ecommerce
+          jwk-set-uri: http://localhost:8180/realms/ecommerce/protocol/openid-connect/certs
+
+keycloak:
+  auth-server-url: http://localhost:8180
+  realm: ecommerce
+  resource: ecommerce-app
+  credentials:
+    secret: ${KEYCLOAK_CLIENT_SECRET}
+```
+
+### LDAP 目錄結構範例
+
+```ldif
+# 組織結構
+dn: dc=example,dc=com
+objectClass: organization
+o: Example Inc
+
+dn: ou=users,dc=example,dc=com
+objectClass: organizationalUnit
+ou: users
+
+dn: ou=groups,dc=example,dc=com
+objectClass: organizationalUnit
+ou: groups
+
+# 使用者
+dn: uid=admin,ou=users,dc=example,dc=com
+objectClass: inetOrgPerson
+uid: admin
+cn: System Admin
+sn: Admin
+mail: admin@example.com
+userPassword: {SSHA}xxxxx
+
+# 群組 (對應 Keycloak 角色)
+dn: cn=admins,ou=groups,dc=example,dc=com
+objectClass: groupOfNames
+cn: admins
+member: uid=admin,ou=users,dc=example,dc=com
+```
+
+## 微服務說明
+
+### Product Service (:8081)
+
+完整 DDD 實作的商品管理服務。
+
+**API 端點：**
+
+| 方法 | 端點 | 說明 | 權限 |
+|------|------|------|------|
+| GET | `/api/products` | 查詢商品列表 | 已認證 |
+| GET | `/api/products/{id}` | 查詢單一商品 | 已認證 |
+| POST | `/api/products` | 建立商品 | ADMIN, TENANT_ADMIN |
+| PUT | `/api/products/{id}` | 更新商品 | ADMIN, TENANT_ADMIN |
+| DELETE | `/api/products/{id}` | 刪除商品 | ADMIN |
+
+**Domain Model：**
+
+```java
+// Product Aggregate
+public class Product {
+    private ProductId id;
+    private ProductCode productCode;
+    private String name;
+    private Money price;
+    private String category;
+    private ProductStatus status;
+    private String tenantId;
+
+    // Domain Events
+    public static Product create(...) {
+        registerEvent(new ProductCreated(...));
     }
-```
-
-### 索引設計
-
-| 索引名稱 | 欄位 | 用途 |
-|----------|------|------|
-| `idx_audit_timestamp` | `timestamp DESC` | 時間範圍查詢 |
-| `idx_audit_username` | `username, timestamp DESC` | 依使用者查詢 |
-| `idx_audit_aggregate` | `aggregate_type, aggregate_id, timestamp DESC` | 依實體查詢 |
-| `idx_audit_event_type` | `event_type, timestamp DESC` | 依事件類型查詢 |
-| `idx_audit_service` | `service_name, timestamp DESC` | 依服務查詢 |
-| `idx_audit_correlation` | `correlation_id` (partial) | 關聯查詢 |
-
-### DDL
-
-```sql
-CREATE TABLE audit_logs (
-    id                UUID            PRIMARY KEY,
-    timestamp         TIMESTAMP       NOT NULL,
-    event_type        VARCHAR(100)    NOT NULL,
-    aggregate_type    VARCHAR(100)    NOT NULL,
-    aggregate_id      VARCHAR(255),
-    username          VARCHAR(100)    NOT NULL DEFAULT 'ANONYMOUS',
-    service_name      VARCHAR(100)    NOT NULL,
-    action            VARCHAR(255),
-    payload           TEXT,
-    result            VARCHAR(20)     NOT NULL,
-    error_message     TEXT,
-    client_ip         VARCHAR(45),
-    correlation_id    VARCHAR(100),
-    payload_truncated BOOLEAN         NOT NULL DEFAULT FALSE,
-
-    CONSTRAINT chk_result CHECK (result IN ('SUCCESS', 'FAILURE')),
-    CONSTRAINT chk_payload_size CHECK (LENGTH(payload) <= 65536)
-);
-
--- Performance indexes
-CREATE INDEX idx_audit_timestamp ON audit_logs(timestamp DESC);
-CREATE INDEX idx_audit_username ON audit_logs(username, timestamp DESC);
-CREATE INDEX idx_audit_aggregate ON audit_logs(aggregate_type, aggregate_id, timestamp DESC);
-CREATE INDEX idx_audit_event_type ON audit_logs(event_type, timestamp DESC);
-CREATE INDEX idx_audit_service ON audit_logs(service_name, timestamp DESC);
-CREATE INDEX idx_audit_correlation ON audit_logs(correlation_id) WHERE correlation_id IS NOT NULL;
-```
-
-### 實體關係說明
-
-```mermaid
-flowchart LR
-    subgraph AuditLogs["Audit Log Records"]
-        AL1[AuditLog 1<br/>correlationId: corr-123]
-        AL2[AuditLog 2<br/>correlationId: corr-123]
-        AL3[AuditLog 3<br/>correlationId: corr-123]
-    end
-
-    subgraph ExternalAggregates["External Aggregates (Referenced by ID)"]
-        P[Product<br/>aggregateType: Product<br/>aggregateId: prod-001]
-        U[User<br/>aggregateType: User<br/>aggregateId: user-001]
-    end
-
-    AL1 -.->|references| P
-    AL2 -.->|references| P
-    AL3 -.->|references| U
-
-    AL1 <-->|same correlationId| AL2
-    AL2 <-->|same correlationId| AL3
-```
-
-> **Note**: AuditLog 是獨立的 Aggregate，透過 `aggregateType` 和 `aggregateId` 字串參照外部實體，不建立直接的資料庫關聯。多個 AuditLog 可透過 `correlationId` 關聯同一交易中的操作。
-
-## API 文件
-
-### Base URL
-
-```
-/api/v1
-```
-
-### Endpoints 概覽
-
-```mermaid
-flowchart LR
-    subgraph Endpoints
-        E1["GET /audit-logs"]
-        E2["GET /audit-logs/{id}"]
-        E3["GET /audit-logs/correlation/{correlationId}"]
-    end
-
-    C[Client] -->|JWT Auth| E1
-    C -->|JWT Auth| E2
-    C -->|JWT Auth| E3
-```
-
-### 1. 查詢稽核日誌
-
-```http
-GET /api/v1/audit-logs
-```
-
-**Query Parameters:**
-
-| 參數 | 類型 | 必填 | 說明 | 範例 |
-|------|------|------|------|------|
-| `username` | string | No | 依執行者過濾 | `admin@example.com` |
-| `aggregateType` | string | No | 依實體類型過濾 | `Product` |
-| `aggregateId` | string | No | 依實體 ID 過濾 | `prod-12345` |
-| `eventType` | string | No | 依事件類型過濾 | `PRODUCT_CREATED` |
-| `serviceName` | string | No | 依服務名稱過濾 | `product-service` |
-| `startTime` | datetime | No | 起始時間 (ISO 8601) | `2026-01-01T00:00:00Z` |
-| `endTime` | datetime | No | 結束時間 (ISO 8601) | `2026-01-31T23:59:59Z` |
-| `result` | enum | No | 依結果過濾 | `SUCCESS`, `FAILURE` |
-| `page` | int | No | 頁碼 (0-indexed) | `0` |
-| `size` | int | No | 每頁筆數 (1-100) | `20` |
-
-**Response:**
-
-```json
-{
-  "content": [
-    {
-      "id": "550e8400-e29b-41d4-a716-446655440001",
-      "timestamp": "2026-01-10T08:30:00.123Z",
-      "eventType": "PRODUCT_CREATED",
-      "aggregateType": "Product",
-      "aggregateId": "prod-12345",
-      "username": "admin@example.com",
-      "serviceName": "product-service",
-      "action": "createProduct",
-      "payload": "{\"productCode\":\"SKU-001\",\"productName\":\"Widget\"}",
-      "result": "SUCCESS",
-      "errorMessage": null,
-      "clientIp": "192.168.1.100",
-      "correlationId": "corr-abc-123",
-      "payloadTruncated": false
-    }
-  ],
-  "page": 0,
-  "size": 20,
-  "totalElements": 150,
-  "totalPages": 8,
-  "first": true,
-  "last": false
 }
 ```
 
-### 2. 依 ID 查詢單筆稽核日誌
+### User Service (:8082)
 
-```http
-GET /api/v1/audit-logs/{id}
+使用者個人資料服務。
+
+**API 端點：**
+
+| 方法 | 端點 | 說明 | 權限 |
+|------|------|------|------|
+| GET | `/api/users/me` | 取得當前使用者資訊 | 已認證 |
+
+### Gateway Service (:8080)
+
+Spring Cloud Gateway 路由閘道。
+
+**路由規則：**
+
+```yaml
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: product-service
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/products/**
+        - id: user-service
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/users/**
 ```
 
-**Path Parameters:**
+## UML 圖表
 
-| 參數 | 類型 | 說明 |
-|------|------|------|
-| `id` | UUID | 稽核日誌 ID |
+### 類別圖 - Product Domain
 
-### 3. 依 Correlation ID 查詢關聯日誌
+```mermaid
+classDiagram
+    class Product {
+        -ProductId id
+        -ProductCode productCode
+        -String name
+        -Money price
+        -String category
+        -String description
+        -ProductStatus status
+        -String tenantId
+        -String createdBy
+        -Instant createdAt
+        +create() Product
+        +update(name, price, category, description, updatedBy)
+        +changePrice(Money newPrice, String changedBy)
+        +delete(String deletedBy)
+        +activate()
+        +deactivate()
+        +pullDomainEvents() List~DomainEvent~
+    }
 
-```http
-GET /api/v1/audit-logs/correlation/{correlationId}
+    class ProductId {
+        -UUID value
+        +generate() ProductId
+        +of(UUID) ProductId
+        +of(String) ProductId
+        +value() UUID
+    }
+
+    class ProductCode {
+        -String value
+        +of(String) ProductCode
+        +generate() ProductCode
+        +value() String
+    }
+
+    class Money {
+        -BigDecimal amount
+        +of(BigDecimal) Money
+        +of(double) Money
+        +zero() Money
+        +add(Money) Money
+        +subtract(Money) Money
+        +multiply(int) Money
+        +isPositive() boolean
+        +validatePositive()
+    }
+
+    class ProductStatus {
+        <<enumeration>>
+        ACTIVE
+        INACTIVE
+        DELETED
+    }
+
+    class DomainEvent {
+        <<interface>>
+        +occurredOn() Instant
+    }
+
+    class ProductCreated {
+        -ProductId productId
+        -ProductCode code
+        -String name
+        -Money price
+        -String category
+        -String createdBy
+        -Instant occurredOn
+    }
+
+    class ProductUpdated
+    class ProductPriceChanged
+    class ProductDeleted
+
+    Product *-- ProductId
+    Product *-- ProductCode
+    Product *-- Money
+    Product *-- ProductStatus
+    Product ..> DomainEvent : produces
+    ProductCreated ..|> DomainEvent
+    ProductUpdated ..|> DomainEvent
+    ProductPriceChanged ..|> DomainEvent
+    ProductDeleted ..|> DomainEvent
 ```
 
-**Path Parameters:**
+### 類別圖 - Application Layer
 
-| 參數 | 類型 | 說明 |
-|------|------|------|
-| `correlationId` | string | 關聯 ID |
+```mermaid
+classDiagram
+    class ProductCommandService {
+        -ProductRepository productRepository
+        +handle(CreateProductCommand) UUID
+        +handle(UpdateProductCommand)
+        +handle(DeleteProductCommand)
+    }
 
-### Authentication
+    class ProductQueryService {
+        -ProductRepository productRepository
+        +handle(GetProductByIdQuery) ProductView
+        +handle(ListProductsQuery) PagedResult~ProductView~
+    }
 
-所有 API 需要 JWT Bearer Token：
+    class ProductRepository {
+        <<interface>>
+        +findById(ProductId) Optional~Product~
+        +findByProductCode(ProductCode) Optional~Product~
+        +findAll() List~Product~
+        +findByTenantId(String) List~Product~
+        +findByCategory(String) List~Product~
+        +save(Product) Product
+        +delete(ProductId)
+        +existsByProductCode(ProductCode) boolean
+    }
 
-```http
-Authorization: Bearer <jwt-token>
+    class CreateProductCommand {
+        +String productCode
+        +String name
+        +BigDecimal price
+        +String category
+        +String description
+    }
+
+    class UpdateProductCommand {
+        +UUID productId
+        +String name
+        +BigDecimal price
+        +String category
+        +String description
+    }
+
+    class DeleteProductCommand {
+        +UUID productId
+    }
+
+    class GetProductByIdQuery {
+        +UUID productId
+    }
+
+    class ListProductsQuery {
+        +int page
+        +int size
+        +String category
+        +String sortBy
+        +String sortDirection
+    }
+
+    ProductCommandService --> ProductRepository : uses
+    ProductQueryService --> ProductRepository : uses
+    ProductCommandService ..> CreateProductCommand : handles
+    ProductCommandService ..> UpdateProductCommand : handles
+    ProductCommandService ..> DeleteProductCommand : handles
+    ProductQueryService ..> GetProductByIdQuery : handles
+    ProductQueryService ..> ListProductsQuery : handles
 ```
 
-### Metrics Endpoints
+### 序列圖 - 建立商品
 
-| Endpoint | 說明 |
-|----------|------|
-| `GET /actuator/metrics/audit.events.total` | 總稽核事件數 |
-| `GET /actuator/metrics/audit.events.failed` | 失敗的稽核擷取數 |
-| `GET /actuator/metrics/audit.capture.latency` | 擷取延遲時間 |
-| `GET /actuator/health` | 包含 audit 健康狀態 |
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client
+    participant Controller as ProductCommandController
+    participant Service as ProductCommandService
+    participant Repository as ProductRepository
+    participant Product as Product (Aggregate)
+    participant DB as Database
+
+    Client->>Controller: POST /api/products
+    Controller->>Controller: 驗證 JWT Token
+    Controller->>Controller: 檢查角色權限
+    Controller->>Service: handle(CreateProductCommand)
+
+    Service->>Service: 從 SecurityContext 取得 username
+    Service->>Service: 從 TenantContext 取得 tenantId
+    Service->>Repository: existsByProductCode(code)
+    Repository-->>Service: false
+
+    Service->>Product: Product.create(...)
+    Product->>Product: 驗證價格 > 0
+    Product->>Product: registerEvent(ProductCreated)
+    Product-->>Service: product
+
+    Service->>Repository: save(product)
+    Repository->>DB: INSERT INTO products
+    DB-->>Repository: OK
+    Repository-->>Service: saved product
+
+    Service-->>Controller: productId
+    Controller-->>Client: 201 Created { id: "uuid" }
+```
+
+### 序列圖 - 多租戶資料隔離
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client
+    participant Filter as TenantFilter
+    participant Context as TenantContext
+    participant Service as ProductQueryService
+    participant Repository as ProductRepository
+
+    Client->>Filter: GET /api/products (JWT Token)
+    Filter->>Filter: 解析 JWT 取得 tenant_id
+    Filter->>Context: setCurrentTenant(tenant_id)
+
+    Filter->>Service: handle(ListProductsQuery)
+    Service->>Context: getCurrentTenant()
+    Context-->>Service: "tenant-a"
+
+    alt tenant == "system"
+        Service->>Repository: findAll()
+    else regular tenant
+        Service->>Repository: findByTenantId("tenant-a")
+    end
+
+    Repository-->>Service: products (filtered)
+    Service-->>Filter: PagedResult
+    Filter->>Context: clear()
+    Filter-->>Client: 200 OK { products: [...] }
+```
+
+### 序列圖 - OAuth2 認證流程
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User
+    participant Browser
+    participant Gateway
+    participant Keycloak
+    participant ProductService
+
+    User->>Browser: 存取 /api/products
+    Browser->>Gateway: GET /api/products
+    Gateway->>Gateway: 無 Token，需認證
+    Gateway-->>Browser: 302 Redirect to Keycloak
+
+    Browser->>Keycloak: 認證頁面
+    User->>Keycloak: 輸入帳密
+    Keycloak->>Keycloak: 驗證 (可能查詢 LDAP)
+    Keycloak-->>Browser: Authorization Code
+
+    Browser->>Gateway: Callback with code
+    Gateway->>Keycloak: 交換 Token
+    Keycloak-->>Gateway: Access Token + Refresh Token
+    Gateway-->>Browser: Set-Cookie (Session)
+
+    Browser->>Gateway: GET /api/products (with session)
+    Gateway->>ProductService: GET /api/products (JWT Header)
+    ProductService->>ProductService: 驗證 JWT 簽章
+    ProductService->>ProductService: 檢查角色權限
+    ProductService-->>Gateway: 200 OK { products }
+    Gateway-->>Browser: 200 OK { products }
+```
 
 ## 快速開始
 
-### 1. 加入依賴
+### 環境需求
 
-```groovy
-dependencies {
-    implementation project(':libs:audit-lib')
-}
+- Java 17+
+- Gradle 8.5+
+- Docker (for Keycloak)
+
+### 建置專案
+
+```bash
+# 編譯
+./gradlew build
+
+# 執行測試
+./gradlew test
+
+# 啟動 Product Service
+./gradlew :services:product-service:bootRun
+
+# 啟動 User Service
+./gradlew :services:user-service:bootRun
+
+# 啟動 Gateway Service
+./gradlew :services:gateway-service:bootRun
 ```
 
-### 2. 設定 application.yml
+### Docker Compose (完整環境)
 
 ```yaml
-audit:
-  enabled: true
-  service-name: ${spring.application.name}
-  payload:
-    max-size: 65536
-  masking:
-    default-fields:
-      - password
-      - secret
-      - token
+version: '3.8'
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    ports:
+      - "8180:8080"
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    command: start-dev
+
+  postgres:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ecommerce
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+
+  gateway:
+    build: ./services/gateway-service
+    ports:
+      - "8080:8080"
+    depends_on:
+      - keycloak
+
+  product-service:
+    build: ./services/product-service
+    ports:
+      - "8081:8081"
+    depends_on:
+      - postgres
+
+  user-service:
+    build: ./services/user-service
+    ports:
+      - "8082:8082"
 ```
 
-### 3. 使用稽核機制
+## 測試
 
-#### 方式一：AOP 方式 (@Auditable)
+### 測試統計
 
-適合簡單的方法級稽核，自動攔截並記錄。
+| 模組 | 測試類型 | 數量 |
+|------|----------|------|
+| product-service | Unit Tests | ~45 |
+| user-service | Unit Tests | ~9 |
+| gateway-service | Unit Tests | ~5 |
+| scenario-tests | Cucumber BDD | 18 |
+| rbac-demo | Integration | ~200+ |
+| **總計** | | **294** |
 
-```java
-@RestController
-@RequestMapping("/api/products")
-public class ProductController {
+### 執行測試
 
-    @PostMapping
-    @Auditable(eventType = "PRODUCT_CREATED", resourceType = "Product")
-    public ApiResponse<UUID> createProduct(@RequestBody CreateProductRequest req) {
-        // Business logic - 無需任何稽核相關程式碼
-        return ApiResponse.success(productId, "Product created");
-    }
+```bash
+# 執行所有測試
+./gradlew test
 
-    @PostMapping("/change-password")
-    @Auditable(
-        eventType = "USER_PASSWORD_CHANGED",
-        resourceType = "User",
-        maskFields = {"oldPassword", "newPassword"}
-    )
-    public ApiResponse<Void> changePassword(@RequestBody ChangePasswordRequest req) {
-        // 密碼欄位會自動遮罩為 "****"
-        return ApiResponse.success(null, "Password changed");
-    }
-}
+# 執行特定服務測試
+./gradlew :services:product-service:test
+
+# 執行 Cucumber 情境測試
+./gradlew :tests:scenario-tests:test
 ```
 
-#### 方式二：Domain Event 方式 (推薦)
+### Cucumber 測試場景
 
-適合需要更細緻控制的場景，如複雜業務流程、批次操作、或條件式稽核。
+```gherkin
+# language: zh-TW
+功能: 角色權限控制
 
-```java
-@Service
-public class ProductService {
+  場景大綱: 角色存取控制
+    假設 使用者 "<使用者>" 已登入系統，角色為 "<角色>"
+    當 使用者嘗試存取 "<端點>"
+    那麼 系統應回傳 "<結果>"
 
-    private final AuditEventPublisher eventPublisher;
-    private final AuditEventBuilder auditEventBuilder;
-    private final ProductRepository productRepository;
-
-    public Product createProduct(CreateProductCommand cmd) {
-        // 1. 執行業務邏輯
-        Product product = Product.create(cmd);
-        productRepository.save(product);
-
-        // 2. 發布稽核事件
-        eventPublisher.publish(auditEventBuilder.success()
-            .eventType("PRODUCT_CREATED")
-            .aggregateType("Product")
-            .aggregateId(product.getId().toString())
-            .action("createProduct")
-            .payload(product)
-            .build());
-
-        return product;
-    }
-
-    public void updateProduct(UpdateProductCommand cmd) {
-        try {
-            Product product = productRepository.findById(cmd.productId())
-                .orElseThrow(() -> new ProductNotFoundException(cmd.productId()));
-
-            product.update(cmd);
-            productRepository.save(product);
-
-            eventPublisher.publish(auditEventBuilder.success()
-                .eventType("PRODUCT_UPDATED")
-                .aggregateType("Product")
-                .aggregateId(product.getId().toString())
-                .action("updateProduct")
-                .payload(cmd)
-                .build());
-
-        } catch (Exception e) {
-            // 記錄失敗事件
-            eventPublisher.publish(auditEventBuilder.failure(e)
-                .eventType("PRODUCT_UPDATE_FAILED")
-                .aggregateType("Product")
-                .aggregateId(cmd.productId())
-                .action("updateProduct")
-                .build());
-
-            throw e;
-        }
-    }
-}
-```
-
-### 整合流程
-
-```mermaid
-flowchart LR
-    A[1. 加入依賴] --> B[2. 設定 YAML]
-    B --> C[3. 建立 DB Schema]
-    C --> D[4. 加入 @Auditable]
-    D --> E[5. 啟動服務]
-    E --> F[6. 驗證稽核日誌]
-```
-
-## 測試範例資料
-
-### 成功操作
-
-```json
-{
-  "id": "550e8400-e29b-41d4-a716-446655440001",
-  "timestamp": "2026-01-10T08:30:00.123Z",
-  "eventType": "PRODUCT_CREATED",
-  "aggregateType": "Product",
-  "aggregateId": "prod-12345",
-  "username": "admin@example.com",
-  "serviceName": "product-service",
-  "action": "createProduct",
-  "payload": "{\"productCode\":\"SKU-001\",\"productName\":\"Widget\",\"price\":99.99}",
-  "result": "SUCCESS",
-  "errorMessage": null,
-  "clientIp": "192.168.1.100",
-  "correlationId": "corr-abc-123",
-  "payloadTruncated": false
-}
-```
-
-### 失敗操作
-
-```json
-{
-  "id": "550e8400-e29b-41d4-a716-446655440002",
-  "timestamp": "2026-01-10T08:31:00.456Z",
-  "eventType": "PRODUCT_UPDATED",
-  "aggregateType": "Product",
-  "aggregateId": "prod-99999",
-  "username": "user@example.com",
-  "serviceName": "product-service",
-  "action": "updateProduct",
-  "payload": "{\"productId\":\"prod-99999\",\"newPrice\":150.00}",
-  "result": "FAILURE",
-  "errorMessage": "ProductNotFoundException: Product with id prod-99999 not found",
-  "clientIp": "192.168.1.101",
-  "correlationId": "corr-def-456",
-  "payloadTruncated": false
-}
-```
-
-### 敏感資料遮罩
-
-```json
-{
-  "id": "550e8400-e29b-41d4-a716-446655440003",
-  "timestamp": "2026-01-10T08:32:00.789Z",
-  "eventType": "USER_PASSWORD_CHANGED",
-  "aggregateType": "User",
-  "aggregateId": "user-67890",
-  "username": "user@example.com",
-  "serviceName": "user-service",
-  "action": "changePassword",
-  "payload": "{\"userId\":\"user-67890\",\"oldPassword\":\"****\",\"newPassword\":\"****\"}",
-  "result": "SUCCESS",
-  "errorMessage": null,
-  "clientIp": "192.168.1.102",
-  "correlationId": null,
-  "payloadTruncated": false
-}
-```
-
-### Payload 截斷
-
-```json
-{
-  "id": "550e8400-e29b-41d4-a716-446655440004",
-  "timestamp": "2026-01-10T08:33:00.012Z",
-  "eventType": "BULK_IMPORT",
-  "aggregateType": "Product",
-  "aggregateId": null,
-  "username": "system",
-  "serviceName": "product-service",
-  "action": "bulkImportProducts",
-  "payload": "{\"_truncated\":true,\"_originalSize\":128000,\"_summary\":{\"recordCount\":500,\"batchId\":\"batch-123\"}}",
-  "result": "SUCCESS",
-  "errorMessage": null,
-  "clientIp": "10.0.0.50",
-  "correlationId": "corr-bulk-789",
-  "payloadTruncated": true
-}
+    例子:
+      | 使用者        | 角色         | 端點              | 結果 |
+      | admin        | ADMIN        | /api/products     | 200  |
+      | admin        | ADMIN        | /api/admin/users  | 200  |
+      | tenant-admin | TENANT_ADMIN | /api/admin/users  | 403  |
+      | user         | USER         | /api/products/new | 403  |
 ```
 
 ## 專案結構
 
 ```
 rbac-sso-poc/
-├── libs/
-│   └── audit-lib/                          # 共用稽核函式庫
-│       ├── build.gradle
-│       └── src/
-│           ├── main/java/com/example/audit/
-│           │   ├── annotation/
-│           │   │   └── Auditable.java              # @Auditable 註解 (AOP)
-│           │   ├── domain/
-│           │   │   ├── model/
-│           │   │   │   ├── AuditLog.java           # 稽核日誌實體
-│           │   │   │   └── AuditEventType.java     # 事件類型值物件
-│           │   │   ├── event/                      # Domain Event
-│           │   │   │   ├── DomainEvent.java        # 基礎事件介面
-│           │   │   │   ├── AuditableDomainEvent.java # 可稽核事件介面
-│           │   │   │   └── BaseAuditEvent.java     # 事件基礎類別
-│           │   │   └── port/
-│           │   │       ├── AuditLogRepository.java # Output Port
-│           │   │       └── AuditEventPublisher.java # 事件發布 Port
-│           │   ├── application/
-│           │   │   ├── service/
-│           │   │   │   └── AuditQueryService.java  # 查詢服務
-│           │   │   ├── event/
-│           │   │   │   └── AuditEventBuilder.java  # 事件建構器
-│           │   │   └── dto/
-│           │   │       └── AuditLogView.java       # 查詢 DTO
-│           │   └── infrastructure/
-│           │       ├── aspect/
-│           │       │   └── AuditAspect.java        # AOP 切面
-│           │       ├── event/                      # Domain Event Adapter
-│           │       │   ├── SpringAuditEventPublisher.java
-│           │       │   └── AuditDomainEventListener.java
-│           │       ├── processor/
-│           │       │   ├── PayloadProcessor.java   # Payload 處理
-│           │       │   └── FieldMasker.java        # 欄位遮罩
-│           │       ├── persistence/
-│           │       │   └── JpaAuditLogRepository.java
-│           │       ├── context/
-│           │       │   └── AuditContextHolder.java # Thread-local context
-│           │       ├── security/                   # OAuth2 安全
-│           │       │   ├── ServiceTokenProvider.java
-│           │       │   └── ServiceAuthInterceptor.java
-│           │       ├── metrics/
-│           │       │   └── AuditMetrics.java       # Micrometer metrics
-│           │       ├── health/
-│           │       │   └── AuditHealthIndicator.java
-│           │       └── config/
-│           │           ├── AuditAutoConfiguration.java
-│           │           ├── SecurityAutoConfiguration.java
-│           │           └── ServiceAuthConfiguration.java
-│           └── test/java/com/example/audit/
-│               ├── unit/
-│               ├── integration/
-│               └── contract/
-├── specs/
-│   └── 001-shared-audit-lib/               # 功能規格文件
-│       ├── spec.md                         # 功能規格
-│       ├── plan.md                         # 實作計畫
-│       ├── tasks.md                        # 任務清單
-│       ├── data-model.md                   # 資料模型
-│       ├── quickstart.md                   # 快速入門
-│       └── contracts/
-│           ├── audit-annotation.md         # Annotation 合約
-│           └── audit-api.yaml              # OpenAPI 規格
-├── build.gradle
-├── settings.gradle
-└── README.md                               # 本文件
+├── libs/                           # 共用函式庫
+│   ├── common-lib/                 # 共用 DTO、Exception
+│   ├── security-lib/               # OAuth2 安全設定
+│   ├── tenant-lib/                 # 多租戶支援
+│   └── audit-lib/                  # 稽核日誌
+│
+├── services/                       # 微服務
+│   ├── product-service/            # 商品服務 (:8081)
+│   │   └── src/main/java/.../product/
+│   │       ├── domain/             # 領域層
+│   │       │   ├── model/aggregate/Product.java
+│   │       │   ├── model/valueobject/
+│   │       │   ├── event/
+│   │       │   └── repository/ProductRepository.java
+│   │       ├── application/        # 應用層
+│   │       │   ├── service/
+│   │       │   ├── port/input/command/
+│   │       │   ├── port/input/query/
+│   │       │   └── dto/
+│   │       └── adapter/            # 介面層
+│   │           ├── inbound/rest/
+│   │           └── outbound/persistence/
+│   │
+│   ├── user-service/               # 使用者服務 (:8082)
+│   └── gateway-service/            # API 閘道 (:8080)
+│
+├── apps/                           # 應用程式
+│   └── rbac-demo/                  # RBAC 示範應用
+│
+├── tests/                          # 測試
+│   └── scenario-tests/             # Cucumber BDD 測試
+│
+├── docs/                           # 文件
+│   ├── PRD.md                      # 產品需求文件
+│   └── TECH.md                     # 技術規格文件
+│
+├── build.gradle                    # 根建置檔
+├── settings.gradle                 # 專案設定
+└── README.md                       # 本文件
 ```
 
-## 效能目標
+## 技術堆疊
 
-| 指標 | 目標 |
-|------|------|
-| 稽核擷取延遲 | < 50ms |
-| 寫入吞吐量 | 100-500 events/second |
-| 查詢回應時間 | < 5 seconds (1M records) |
-| Payload 大小限制 | 64 KB |
-
-## 設計原則
-
-本專案遵循以下架構原則：
-
-```mermaid
-mindmap
-  root((Design Principles))
-    Hexagonal Architecture
-      Domain Layer
-      Application Layer
-      Infrastructure Layer
-    Domain-Driven Design
-      AuditLog as Aggregate Root
-      Value Objects
-      Ubiquitous Language
-    SOLID Principles
-      Single Responsibility
-      Dependency Inversion
-    Data Integrity
-      Append-Only Semantics
-      No Update/Delete
-```
+| 類別 | 技術 | 版本 |
+|------|------|------|
+| 語言 | Java | 17 |
+| 框架 | Spring Boot | 3.3.x |
+| 安全 | Spring Security OAuth2 | 6.x |
+| 資料存取 | Spring Data JPA | 3.3.x |
+| 閘道 | Spring Cloud Gateway | 4.x |
+| 認證 | Keycloak | 23.x |
+| 資料庫 | PostgreSQL / H2 | 15 / 2.x |
+| 測試 | JUnit 5, Mockito, Cucumber | 5.x |
+| 建置 | Gradle | 8.5 |
 
 ## License
 
