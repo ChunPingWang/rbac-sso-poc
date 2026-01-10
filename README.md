@@ -660,6 +660,147 @@ sequenceDiagram
     Gateway-->>Browser: 200 OK { products }
 ```
 
+### 序列圖 - 稽核日誌 (Spring AOP)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client
+    participant Controller as ProductCommandController
+    participant AOP as AuditAspect
+    participant Service as ProductCommandService
+    participant Repo as AuditLogRepository
+    participant DB as Database
+
+    Client->>Controller: POST /api/products
+    Controller->>AOP: @Auditable 攔截
+    AOP->>AOP: 記錄方法開始時間
+    AOP->>AOP: 擷取請求參數
+
+    AOP->>Service: proceed() 執行原方法
+    Service-->>AOP: result (成功/失敗)
+
+    AOP->>AOP: 建立 AuditLog
+    Note over AOP: eventType: CREATE_PRODUCT<br/>username, tenantId<br/>payload (已遮罩)
+
+    AOP->>Repo: save(auditLog)
+    Repo->>DB: INSERT INTO audit_logs
+    DB-->>Repo: OK
+
+    AOP-->>Controller: result
+    Controller-->>Client: 201 Created
+```
+
+### 序列圖 - 稽核日誌 (Domain Event)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client
+    participant Controller as ProductCommandController
+    participant Service as ProductCommandService
+    participant Product as Product Aggregate
+    participant Publisher as AuditEventPublisher
+    participant Listener as AuditDomainEventListener
+    participant Repo as AuditLogRepository
+
+    Client->>Controller: POST /api/products
+    Controller->>Service: handle(CreateProductCommand)
+
+    Service->>Product: Product.create(...)
+    Product->>Product: registerEvent(ProductCreated)
+    Note over Product: 領域事件儲存在聚合內
+
+    Service->>Publisher: publishEvents(product.pullDomainEvents())
+    Publisher->>Publisher: Spring ApplicationEventPublisher
+
+    Publisher->>Listener: @EventListener(AuditableDomainEvent)
+    Listener->>Listener: 轉換為 AuditLog
+    Listener->>Repo: save(auditLog)
+
+    Service-->>Controller: productId
+    Controller-->>Client: 201 Created
+```
+
+### 類別圖 - Audit Lib
+
+```mermaid
+classDiagram
+    class AuditAspect {
+        -AuditLogRepository repository
+        -PayloadProcessor payloadProcessor
+        +auditMethod(ProceedingJoinPoint) Object
+    }
+
+    class Auditable {
+        <<annotation>>
+        +eventType() AuditEventType
+        +description() String
+    }
+
+    class AuditLog {
+        -AuditLogId id
+        -AuditEventType eventType
+        -String username
+        -String tenantId
+        -String payload
+        -AuditResult result
+        -Instant timestamp
+        +create() AuditLog
+    }
+
+    class AuditEventType {
+        <<enumeration>>
+        CREATE_PRODUCT
+        UPDATE_PRODUCT
+        DELETE_PRODUCT
+        USER_LOGIN
+        USER_LOGOUT
+        PERMISSION_CHANGE
+    }
+
+    class AuditEventPublisher {
+        <<interface>>
+        +publish(AuditableDomainEvent event)
+    }
+
+    class SpringAuditEventPublisher {
+        -ApplicationEventPublisher publisher
+        +publish(AuditableDomainEvent event)
+    }
+
+    class AuditDomainEventListener {
+        -AuditLogRepository repository
+        +handleAuditEvent(AuditableDomainEvent event)
+    }
+
+    class AuditableDomainEvent {
+        <<interface>>
+        +getEventType() AuditEventType
+        +getPayload() Map
+        +getOccurredOn() Instant
+    }
+
+    class PayloadProcessor {
+        -List~FieldMasker~ maskers
+        +process(Object payload) String
+    }
+
+    class FieldMasker {
+        <<interface>>
+        +shouldMask(String fieldName) boolean
+        +mask(String value) String
+    }
+
+    AuditAspect --> Auditable : reads
+    AuditAspect --> AuditLog : creates
+    AuditAspect --> PayloadProcessor : uses
+    SpringAuditEventPublisher ..|> AuditEventPublisher
+    AuditDomainEventListener --> AuditableDomainEvent : handles
+    AuditDomainEventListener --> AuditLog : creates
+    PayloadProcessor --> FieldMasker : uses
+```
+
 ## 快速開始
 
 ### 環境需求
