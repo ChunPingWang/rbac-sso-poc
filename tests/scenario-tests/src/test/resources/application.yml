@@ -1,0 +1,8 @@
+spring:
+  main:
+    web-application-type: none
+
+logging:
+  level:
+    root: INFO
+    com.example.ecommerce: DEBUG

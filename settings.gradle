@@ -1,4 +1,18 @@
 rootProject.name = 'rbac-sso-poc'
 
+// ===== 共用模組 =====
 include 'libs:audit-lib'
+include 'libs:common-lib'
+include 'libs:security-lib'
+include 'libs:tenant-lib'
+
+// ===== 微服務 =====
+include 'services:product-service'
+include 'services:user-service'
+include 'services:gateway-service'
+
+// ===== 應用程式 (保留既有) =====
 include 'apps:rbac-demo'
+
+// ===== 整合測試 =====
+include 'tests:scenario-tests'

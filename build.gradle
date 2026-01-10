@@ -2,11 +2,13 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.3.5' apply false
     id 'io.spring.dependency-management' version '1.1.6' apply false
+    id 'jacoco'
 }
 
 allprojects {
-    group = 'com.example'
+    group = 'com.example.ecommerce'
     version = '1.0.0-SNAPSHOT'
+
     repositories {
         mavenCentral()
     }
@@ -14,6 +16,14 @@ allprojects {
 
 subprojects {
     apply plugin: 'java'
+    apply plugin: 'jacoco'
+
+    ext {
+        springCloudVersion = '2023.0.3'
+        springDocVersion = '2.5.0'
+        cucumberVersion = '7.18.0'
+        testcontainersVersion = '1.19.8'
+    }
 
     java {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -23,5 +33,48 @@ subprojects {
     tasks.withType(JavaCompile).configureEach {
         options.encoding = 'UTF-8'
         options.compilerArgs += ['-parameters']
+    }
+
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+    }
+
+    tasks.jacocoTestReport {
+        reports {
+            xml.required = true
+            html.required = true
+        }
+    }
+}
+
+// 為微服務配置 Spring Boot (只對有 src 目錄的子專案)
+configure(subprojects.findAll {
+    (it.path.startsWith(':services:') || it.path.startsWith(':apps:')) &&
+    new File(it.projectDir, 'src').exists()
+}) {
+    apply plugin: 'org.springframework.boot'
+    apply plugin: 'io.spring.dependency-management'
+
+    dependencyManagement {
+        imports {
+            mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+        }
+    }
+}
+
+// 根專案測試覆蓋率彙總
+tasks.register('jacocoRootReport', JacocoReport) {
+    dependsOn subprojects.collect { it.tasks.named('test') }
+
+    additionalSourceDirs.from(subprojects.collect { it.sourceSets.main.allSource.srcDirs })
+    sourceDirectories.from(subprojects.collect { it.sourceSets.main.allSource.srcDirs })
+    classDirectories.from(subprojects.collect { it.sourceSets.main.output })
+    executionData.from(subprojects.collect {
+        it.tasks.findByName('test')?.extensions?.findByType(JacocoTaskExtension)?.destinationFile
+    }.findAll { it != null })
+
+    reports {
+        xml.required = true
+        html.required = true
     }
 }

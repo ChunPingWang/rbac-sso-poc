@@ -1815,3 +1815,1132 @@ libs/audit-lib/
 - [Hexagonal Architecture by Alistair Cockburn](https://alistair.cockburn.us/hexagonal-architecture/)
 - [Domain-Driven Design by Eric Evans](https://www.domainlanguage.com/ddd/)
 - [CQRS by Martin Fowler](https://martinfowler.com/bliki/CQRS.html)
+# TECH: 電子商務多租戶平台 - 技術架構文件
+
+## 文件資訊
+
+| 項目 | 內容 |
+|------|------|
+| 文件版本 | 1.0 |
+| 建立日期 | 2026-01-10 |
+| 專案代號 | ECOMMERCE-MULTITENANT-POC |
+| 適用範圍 | Application Architecture |
+
+---
+
+## 1. 技術棧總覽
+
+### 1.1 核心技術
+
+| Category | Technology | Version |
+|----------|------------|---------|
+| Language | Java | 21 (LTS) |
+| Framework | Spring Boot | 3.3.x |
+| Build Tool | Gradle (Kotlin DSL) | 8.5+ |
+| Gateway | Spring Cloud Gateway | 4.1.x |
+| Security | Spring Security + OAuth2 | 6.3.x |
+| Identity | Keycloak | 24.x |
+| API Doc | SpringDoc OpenAPI | 2.5.x |
+| Database | PostgreSQL | 16.x |
+| ORM | Spring Data JPA | 3.3.x |
+| Testing | JUnit 5 + Cucumber | 7.x |
+| Container | Docker | 24.x |
+
+### 1.2 模組依賴關係
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         gateway-service                             │
+│                    (Spring Cloud Gateway)                           │
+└─────────────────────────────┬───────────────────────────────────────┘
+                              │
+            ┌─────────────────┼─────────────────┐
+            │                 │                 │
+            ▼                 ▼                 ▼
+┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
+│  product-service  │ │   user-service    │ │  (future svc)     │
+└─────────┬─────────┘ └─────────┬─────────┘ └───────────────────┘
+          │                     │
+          └──────────┬──────────┘
+                     │
+          ┌──────────┼──────────┐
+          │          │          │
+          ▼          ▼          ▼
+┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+│  common-lib  │ │ security-lib │ │  tenant-lib  │
+└──────────────┘ └──────────────┘ └──────────────┘
+```
+
+---
+
+## 2. Gradle Multi-Module 設定
+
+### 2.1 根目錄 settings.gradle.kts
+
+```kotlin
+rootProject.name = "ecommerce-multitenant-poc"
+
+// ===== 共用模組 =====
+include("libs:common-lib")
+include("libs:security-lib")
+include("libs:tenant-lib")
+
+// ===== 微服務 =====
+include("services:product-service")
+include("services:user-service")
+include("services:gateway-service")
+
+// ===== 測試模組 =====
+include("tests:scenario-tests")
+
+// ===== Dependency Version Catalog =====
+dependencyResolutionManagement {
+    versionCatalogs {
+        create("libs") {
+            // Versions
+            version("spring-boot", "3.3.0")
+            version("spring-cloud", "2023.0.2")
+            version("lombok", "1.18.32")
+            version("mapstruct", "1.5.5.Final")
+            version("springdoc", "2.5.0")
+            version("cucumber", "7.18.0")
+            version("testcontainers", "1.19.8")
+            
+            // Spring Boot Starters
+            library("spring-boot-starter-web", "org.springframework.boot", "spring-boot-starter-web").versionRef("spring-boot")
+            library("spring-boot-starter-data-jpa", "org.springframework.boot", "spring-boot-starter-data-jpa").versionRef("spring-boot")
+            library("spring-boot-starter-security", "org.springframework.boot", "spring-boot-starter-security").versionRef("spring-boot")
+            library("spring-boot-starter-oauth2-resource-server", "org.springframework.boot", "spring-boot-starter-oauth2-resource-server").versionRef("spring-boot")
+            library("spring-boot-starter-validation", "org.springframework.boot", "spring-boot-starter-validation").versionRef("spring-boot")
+            library("spring-boot-starter-test", "org.springframework.boot", "spring-boot-starter-test").versionRef("spring-boot")
+            
+            // Spring Cloud
+            library("spring-cloud-starter-gateway", "org.springframework.cloud", "spring-cloud-starter-gateway").versionRef("spring-cloud")
+            
+            // Database
+            library("postgresql", "org.postgresql", "postgresql").version("42.7.3")
+            library("h2", "com.h2database", "h2").version("2.2.224")
+            
+            // Tools
+            library("lombok", "org.projectlombok", "lombok").versionRef("lombok")
+            library("mapstruct", "org.mapstruct", "mapstruct").versionRef("mapstruct")
+            library("mapstruct-processor", "org.mapstruct", "mapstruct-processor").versionRef("mapstruct")
+            
+            // API Docs
+            library("springdoc-openapi-starter", "org.springdoc", "springdoc-openapi-starter-webmvc-ui").versionRef("springdoc")
+            
+            // Testing
+            library("cucumber-java", "io.cucumber", "cucumber-java").versionRef("cucumber")
+            library("cucumber-spring", "io.cucumber", "cucumber-spring").versionRef("cucumber")
+            library("cucumber-junit-platform", "io.cucumber", "cucumber-junit-platform-engine").versionRef("cucumber")
+            library("testcontainers-postgresql", "org.testcontainers", "postgresql").versionRef("testcontainers")
+            library("testcontainers-junit", "org.testcontainers", "junit-jupiter").versionRef("testcontainers")
+        }
+    }
+}
+```
+
+### 2.2 根目錄 build.gradle.kts
+
+```kotlin
+plugins {
+    java
+    id("org.springframework.boot") version "3.3.0" apply false
+    id("io.spring.dependency-management") version "1.1.5" apply false
+    id("jacoco")
+}
+
+allprojects {
+    group = "com.example.ecommerce"
+    version = "1.0.0-SNAPSHOT"
+
+    repositories {
+        mavenCentral()
+    }
+}
+
+subprojects {
+    apply(plugin = "java")
+    apply(plugin = "jacoco")
+    
+    java {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+
+    tasks.withType<JavaCompile> {
+        options.encoding = "UTF-8"
+        options.compilerArgs.add("-parameters")
+    }
+
+    tasks.withType<Test> {
+        useJUnitPlatform()
+    }
+    
+    tasks.jacocoTestReport {
+        reports {
+            xml.required.set(true)
+            html.required.set(true)
+        }
+    }
+}
+
+// 根專案測試覆蓋率彙總
+tasks.register<JacocoReport>("jacocoRootReport") {
+    dependsOn(subprojects.map { it.tasks.named("test") })
+    
+    additionalSourceDirs.setFrom(subprojects.map { it.sourceSets.main.get().allSource.srcDirs })
+    sourceDirectories.setFrom(subprojects.map { it.sourceSets.main.get().allSource.srcDirs })
+    classDirectories.setFrom(subprojects.map { it.sourceSets.main.get().output })
+    executionData.setFrom(subprojects.mapNotNull { 
+        it.tasks.findByName("test")?.let { task ->
+            (task as Test).extensions.getByType(JacocoTaskExtension::class).destinationFile
+        }
+    })
+    
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+    }
+}
+```
+
+### 2.3 gradle.properties
+
+```properties
+# Gradle
+org.gradle.parallel=true
+org.gradle.caching=true
+org.gradle.daemon=true
+org.gradle.jvmargs=-Xmx2g -XX:+HeapDumpOnOutOfMemoryError
+
+# Project
+projectVersion=1.0.0-SNAPSHOT
+javaVersion=21
+```
+
+---
+
+## 3. 共用模組 (libs/)
+
+### 3.1 common-lib/build.gradle.kts
+
+```kotlin
+plugins {
+    `java-library`
+}
+
+dependencies {
+    api(libs.lombok)
+    annotationProcessor(libs.lombok)
+    
+    api("jakarta.validation:jakarta.validation-api:3.0.2")
+    api("com.fasterxml.jackson.core:jackson-annotations:2.17.1")
+    
+    testImplementation(libs.spring.boot.starter.test)
+}
+```
+
+### 3.2 common-lib 核心類別
+
+**BaseEntity.java**
+```java
+package com.example.ecommerce.common.entity;
+
+import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
+import java.time.LocalDateTime;
+
+@Getter
+@Setter
+@MappedSuperclass
+public abstract class BaseEntity {
+    
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Column(name = "tenant_id", nullable = false)
+    private String tenantId;
+    
+    @Column(name = "created_at")
+    private LocalDateTime createdAt;
+    
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+    
+    @Column(name = "created_by")
+    private String createdBy;
+    
+    @Column(name = "updated_by")
+    private String updatedBy;
+    
+    @PrePersist
+    protected void onCreate() {
+        createdAt = LocalDateTime.now();
+        updatedAt = LocalDateTime.now();
+    }
+    
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = LocalDateTime.now();
+    }
+}
+```
+
+**ApiResponse.java**
+```java
+package com.example.ecommerce.common.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ApiResponse<T> {
+    private boolean success;
+    private String message;
+    private T data;
+    private String errorCode;
+    
+    public static <T> ApiResponse<T> success(T data) {
+        return ApiResponse.<T>builder()
+                .success(true)
+                .data(data)
+                .build();
+    }
+    
+    public static <T> ApiResponse<T> error(String message, String errorCode) {
+        return ApiResponse.<T>builder()
+                .success(false)
+                .message(message)
+                .errorCode(errorCode)
+                .build();
+    }
+}
+```
+
+### 3.3 security-lib/build.gradle.kts
+
+```kotlin
+plugins {
+    `java-library`
+    id("org.springframework.boot")
+    id("io.spring.dependency-management")
+}
+
+tasks.bootJar { enabled = false }
+tasks.jar { enabled = true }
+
+dependencies {
+    api(project(":libs:common-lib"))
+    api(libs.spring.boot.starter.security)
+    api(libs.spring.boot.starter.oauth2.resource.server)
+    
+    compileOnly(libs.lombok)
+    annotationProcessor(libs.lombok)
+    
+    testImplementation(libs.spring.boot.starter.test)
+}
+```
+
+**SecurityConfig.java**
+```java
+package com.example.ecommerce.security.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.web.SecurityFilterChain;
+
+@Configuration
+@EnableWebSecurity
+@EnableMethodSecurity(prePostEnabled = true)
+public class SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable())
+            .sessionManagement(session -> 
+                session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/actuator/**", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                .requestMatchers("/api/**").authenticated()
+                .anyRequest().authenticated())
+            .oauth2ResourceServer(oauth2 -> 
+                oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())));
+        
+        return http.build();
+    }
+    
+    @Bean
+    public JwtAuthenticationConverter jwtAuthenticationConverter() {
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(new KeycloakRoleConverter());
+        return converter;
+    }
+}
+```
+
+**KeycloakRoleConverter.java**
+```java
+package com.example.ecommerce.security.converter;
+
+import org.springframework.core.convert.converter.Converter;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.jwt.Jwt;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+public class KeycloakRoleConverter implements Converter<Jwt, Collection<GrantedAuthority>> {
+
+    @Override
+    public Collection<GrantedAuthority> convert(Jwt jwt) {
+        Map<String, Object> realmAccess = jwt.getClaimAsMap("realm_access");
+        
+        if (realmAccess == null || realmAccess.isEmpty()) {
+            return Collections.emptyList();
+        }
+        
+        @SuppressWarnings("unchecked")
+        List<String> roles = (List<String>) realmAccess.get("roles");
+        
+        return roles.stream()
+                .map(role -> new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()))
+                .collect(Collectors.toList());
+    }
+}
+```
+
+### 3.4 tenant-lib/build.gradle.kts
+
+```kotlin
+plugins {
+    `java-library`
+    id("org.springframework.boot")
+    id("io.spring.dependency-management")
+}
+
+tasks.bootJar { enabled = false }
+tasks.jar { enabled = true }
+
+dependencies {
+    api(project(":libs:common-lib"))
+    api(project(":libs:security-lib"))
+    api(libs.spring.boot.starter.data.jpa)
+    
+    compileOnly(libs.lombok)
+    annotationProcessor(libs.lombok)
+    
+    testImplementation(libs.spring.boot.starter.test)
+}
+```
+
+**TenantContext.java**
+```java
+package com.example.ecommerce.tenant.context;
+
+public class TenantContext {
+    
+    private static final ThreadLocal<String> CURRENT_TENANT = new ThreadLocal<>();
+    
+    public static String getCurrentTenant() {
+        return CURRENT_TENANT.get();
+    }
+    
+    public static void setCurrentTenant(String tenantId) {
+        CURRENT_TENANT.set(tenantId);
+    }
+    
+    public static void clear() {
+        CURRENT_TENANT.remove();
+    }
+}
+```
+
+**TenantFilter.java**
+```java
+package com.example.ecommerce.tenant.filter;
+
+import com.example.ecommerce.tenant.context.TenantContext;
+import jakarta.servlet.*;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+
+@Component
+public class TenantFilter implements Filter {
+
+    @Override
+    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+            throws IOException, ServletException {
+        try {
+            String tenantId = extractTenantFromToken();
+            TenantContext.setCurrentTenant(tenantId);
+            chain.doFilter(request, response);
+        } finally {
+            TenantContext.clear();
+        }
+    }
+    
+    private String extractTenantFromToken() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        
+        if (authentication != null && authentication.getPrincipal() instanceof Jwt jwt) {
+            // 從 JWT claims 中提取 tenant_id
+            String tenantId = jwt.getClaimAsString("tenant_id");
+            if (tenantId != null) {
+                return tenantId;
+            }
+            
+            // 系統管理者可以存取所有租戶
+            if (hasRole(jwt, "ADMIN")) {
+                return "system";
+            }
+        }
+        
+        return "unknown";
+    }
+    
+    private boolean hasRole(Jwt jwt, String role) {
+        Map<String, Object> realmAccess = jwt.getClaimAsMap("realm_access");
+        if (realmAccess != null) {
+            @SuppressWarnings("unchecked")
+            List<String> roles = (List<String>) realmAccess.get("roles");
+            return roles != null && roles.contains(role);
+        }
+        return false;
+    }
+}
+```
+
+**TenantAwareRepository.java**
+```java
+package com.example.ecommerce.tenant.repository;
+
+import com.example.ecommerce.tenant.context.TenantContext;
+import jakarta.persistence.EntityManager;
+import org.hibernate.Session;
+import org.springframework.data.jpa.repository.support.JpaEntityInformation;
+import org.springframework.data.jpa.repository.support.SimpleJpaRepository;
+
+import java.io.Serializable;
+
+public class TenantAwareRepository<T, ID extends Serializable> 
+        extends SimpleJpaRepository<T, ID> {
+
+    private final EntityManager entityManager;
+
+    public TenantAwareRepository(JpaEntityInformation<T, ?> entityInformation,
+                                  EntityManager entityManager) {
+        super(entityInformation, entityManager);
+        this.entityManager = entityManager;
+    }
+
+    @Override
+    protected T getReferenceById(ID id) {
+        enableTenantFilter();
+        return super.getReferenceById(id);
+    }
+
+    private void enableTenantFilter() {
+        String currentTenant = TenantContext.getCurrentTenant();
+        if (currentTenant != null && !"system".equals(currentTenant)) {
+            Session session = entityManager.unwrap(Session.class);
+            session.enableFilter("tenantFilter")
+                   .setParameter("tenantId", currentTenant);
+        }
+    }
+}
+```
+
+---
+
+## 4. 微服務模組 (services/)
+
+### 4.1 product-service/build.gradle.kts
+
+```kotlin
+plugins {
+    id("org.springframework.boot")
+    id("io.spring.dependency-management")
+}
+
+dependencies {
+    implementation(project(":libs:common-lib"))
+    implementation(project(":libs:security-lib"))
+    implementation(project(":libs:tenant-lib"))
+    
+    implementation(libs.spring.boot.starter.web)
+    implementation(libs.spring.boot.starter.data.jpa)
+    implementation(libs.spring.boot.starter.validation)
+    implementation(libs.springdoc.openapi.starter)
+    
+    runtimeOnly(libs.postgresql)
+    runtimeOnly(libs.h2)
+    
+    compileOnly(libs.lombok)
+    annotationProcessor(libs.lombok)
+    annotationProcessor(libs.mapstruct.processor)
+    
+    testImplementation(libs.spring.boot.starter.test)
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.junit)
+}
+```
+
+### 4.2 Product Domain
+
+**Product.java**
+```java
+package com.example.ecommerce.product.domain;
+
+import com.example.ecommerce.common.entity.BaseEntity;
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.Filter;
+import org.hibernate.annotations.FilterDef;
+import org.hibernate.annotations.ParamDef;
+
+import java.math.BigDecimal;
+
+@Entity
+@Table(name = "products")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@FilterDef(name = "tenantFilter", parameters = @ParamDef(name = "tenantId", type = String.class))
+@Filter(name = "tenantFilter", condition = "tenant_id = :tenantId")
+public class Product extends BaseEntity {
+
+    @Column(nullable = false)
+    private String name;
+    
+    @Column(nullable = false)
+    private String category;
+    
+    @Column(nullable = false, precision = 10, scale = 2)
+    private BigDecimal price;
+    
+    @Column(nullable = false)
+    private Integer stock;
+    
+    @Column(length = 1000)
+    private String description;
+    
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean active = true;
+}
+```
+
+**ProductRepository.java**
+```java
+package com.example.ecommerce.product.repository;
+
+import com.example.ecommerce.product.domain.Product;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public interface ProductRepository extends JpaRepository<Product, Long> {
+    
+    List<Product> findByTenantIdAndActiveTrue(String tenantId);
+    
+    Optional<Product> findByIdAndTenantId(Long id, String tenantId);
+    
+    @Query("SELECT p FROM Product p WHERE p.active = true")
+    List<Product> findAllActive();
+    
+    List<Product> findByCategoryAndTenantId(String category, String tenantId);
+}
+```
+
+**ProductService.java**
+```java
+package com.example.ecommerce.product.service;
+
+import com.example.ecommerce.product.domain.Product;
+import com.example.ecommerce.product.dto.*;
+import com.example.ecommerce.product.repository.ProductRepository;
+import com.example.ecommerce.tenant.context.TenantContext;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+public class ProductService {
+
+    private final ProductRepository productRepository;
+    private final ProductMapper productMapper;
+
+    public List<ProductResponse> findAll() {
+        String tenantId = TenantContext.getCurrentTenant();
+        
+        List<Product> products;
+        if ("system".equals(tenantId)) {
+            // 系統管理者可以看到所有商品
+            products = productRepository.findAllActive();
+        } else {
+            // 一般使用者只能看到自己租戶的商品
+            products = productRepository.findByTenantIdAndActiveTrue(tenantId);
+        }
+        
+        return productMapper.toResponseList(products);
+    }
+
+    public ProductResponse findById(Long id) {
+        String tenantId = TenantContext.getCurrentTenant();
+        
+        Product product;
+        if ("system".equals(tenantId)) {
+            product = productRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
+        } else {
+            product = productRepository.findByIdAndTenantId(id, tenantId)
+                    .orElseThrow(() -> new AccessDeniedException("Access denied to this product"));
+        }
+        
+        return productMapper.toResponse(product);
+    }
+
+    @Transactional
+    public ProductResponse create(CreateProductRequest request) {
+        String tenantId = TenantContext.getCurrentTenant();
+        
+        Product product = productMapper.toEntity(request);
+        product.setTenantId(tenantId);
+        
+        Product saved = productRepository.save(product);
+        return productMapper.toResponse(saved);
+    }
+
+    @Transactional
+    public ProductResponse update(Long id, UpdateProductRequest request) {
+        String tenantId = TenantContext.getCurrentTenant();
+        
+        Product product = productRepository.findByIdAndTenantId(id, tenantId)
+                .orElseThrow(() -> new AccessDeniedException("Access denied to this product"));
+        
+        productMapper.updateEntity(request, product);
+        
+        Product saved = productRepository.save(product);
+        return productMapper.toResponse(saved);
+    }
+
+    @Transactional
+    public void delete(Long id) {
+        String tenantId = TenantContext.getCurrentTenant();
+        
+        Product product = productRepository.findByIdAndTenantId(id, tenantId)
+                .orElseThrow(() -> new AccessDeniedException("Access denied to this product"));
+        
+        // 軟刪除
+        product.setActive(false);
+        productRepository.save(product);
+    }
+}
+```
+
+**ProductController.java**
+```java
+package com.example.ecommerce.product.controller;
+
+import com.example.ecommerce.common.dto.ApiResponse;
+import com.example.ecommerce.product.dto.*;
+import com.example.ecommerce.product.service.ProductService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/products")
+@RequiredArgsConstructor
+@Tag(name = "Product", description = "商品管理 API")
+public class ProductController {
+
+    private final ProductService productService;
+
+    @GetMapping
+    @PreAuthorize("hasAnyRole('USER', 'TENANT_ADMIN', 'ADMIN')")
+    @Operation(summary = "查詢商品列表")
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> findAll() {
+        List<ProductResponse> products = productService.findAll();
+        return ResponseEntity.ok(ApiResponse.success(products));
+    }
+
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('USER', 'TENANT_ADMIN', 'ADMIN')")
+    @Operation(summary = "查詢單一商品")
+    public ResponseEntity<ApiResponse<ProductResponse>> findById(@PathVariable Long id) {
+        ProductResponse product = productService.findById(id);
+        return ResponseEntity.ok(ApiResponse.success(product));
+    }
+
+    @PostMapping
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN', 'ADMIN')")
+    @Operation(summary = "新增商品")
+    public ResponseEntity<ApiResponse<ProductResponse>> create(
+            @Valid @RequestBody CreateProductRequest request) {
+        ProductResponse product = productService.create(request);
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(ApiResponse.success(product));
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN', 'ADMIN')")
+    @Operation(summary = "修改商品")
+    public ResponseEntity<ApiResponse<ProductResponse>> update(
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateProductRequest request) {
+        ProductResponse product = productService.update(id, request);
+        return ResponseEntity.ok(ApiResponse.success(product));
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN', 'ADMIN')")
+    @Operation(summary = "刪除商品")
+    public ResponseEntity<Void> delete(@PathVariable Long id) {
+        productService.delete(id);
+        return ResponseEntity.noContent().build();
+    }
+}
+```
+
+### 4.3 user-service/build.gradle.kts
+
+```kotlin
+plugins {
+    id("org.springframework.boot")
+    id("io.spring.dependency-management")
+}
+
+dependencies {
+    implementation(project(":libs:common-lib"))
+    implementation(project(":libs:security-lib"))
+    implementation(project(":libs:tenant-lib"))
+    
+    implementation(libs.spring.boot.starter.web)
+    implementation(libs.spring.boot.starter.data.jpa)
+    implementation(libs.spring.boot.starter.validation)
+    implementation(libs.springdoc.openapi.starter)
+    
+    // Keycloak Admin Client
+    implementation("org.keycloak:keycloak-admin-client:24.0.4")
+    
+    runtimeOnly(libs.postgresql)
+    runtimeOnly(libs.h2)
+    
+    compileOnly(libs.lombok)
+    annotationProcessor(libs.lombok)
+    
+    testImplementation(libs.spring.boot.starter.test)
+}
+```
+
+### 4.4 gateway-service/build.gradle.kts
+
+```kotlin
+plugins {
+    id("org.springframework.boot")
+    id("io.spring.dependency-management")
+}
+
+dependencies {
+    implementation(project(":libs:common-lib"))
+    
+    implementation("org.springframework.cloud:spring-cloud-starter-gateway")
+    implementation(libs.spring.boot.starter.oauth2.resource.server)
+    
+    testImplementation(libs.spring.boot.starter.test)
+}
+
+dependencyManagement {
+    imports {
+        mavenBom("org.springframework.cloud:spring-cloud-dependencies:2023.0.2")
+    }
+}
+```
+
+**application.yml (gateway-service)**
+```yaml
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway-service
+  cloud:
+    gateway:
+      routes:
+        - id: product-service
+          uri: lb://product-service
+          predicates:
+            - Path=/api/products/**
+        - id: user-service
+          uri: lb://user-service
+          predicates:
+            - Path=/api/users/**
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:8180/realms/ecommerce
+```
+
+---
+
+## 5. 情境測試模組 (tests/)
+
+### 5.1 scenario-tests/build.gradle.kts
+
+```kotlin
+plugins {
+    id("org.springframework.boot")
+    id("io.spring.dependency-management")
+}
+
+dependencies {
+    testImplementation(project(":libs:common-lib"))
+    
+    testImplementation(libs.spring.boot.starter.test)
+    testImplementation(libs.spring.boot.starter.web)
+    
+    // Cucumber
+    testImplementation(libs.cucumber.java)
+    testImplementation(libs.cucumber.spring)
+    testImplementation(libs.cucumber.junit.platform)
+    
+    // Testcontainers
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.junit)
+    testImplementation("org.testcontainers:keycloak:1.19.8")
+    
+    // REST Assured
+    testImplementation("io.rest-assured:rest-assured:5.4.0")
+}
+
+tasks.test {
+    useJUnitPlatform()
+    systemProperty("cucumber.junit-platform.naming-strategy", "long")
+}
+```
+
+### 5.2 Cucumber 測試架構
+
+**CucumberSpringConfiguration.java**
+```java
+package com.example.ecommerce.tests.config;
+
+import io.cucumber.spring.CucumberContextConfiguration;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.KeycloakContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+@CucumberContextConfiguration
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Testcontainers
+public class CucumberSpringConfiguration {
+
+    @Container
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16")
+            .withDatabaseName("ecommerce_test")
+            .withUsername("test")
+            .withPassword("test");
+
+    @Container
+    static KeycloakContainer keycloak = new KeycloakContainer()
+            .withRealmImportFile("keycloak/realm-export.json");
+
+    @DynamicPropertySource
+    static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri",
+                () -> keycloak.getAuthServerUrl() + "/realms/ecommerce");
+    }
+}
+```
+
+**ProductSteps.java**
+```java
+package com.example.ecommerce.tests.steps;
+
+import io.cucumber.java.en.*;
+import io.restassured.RestAssured;
+import io.restassured.response.Response;
+import org.springframework.boot.test.web.server.LocalServerPort;
+
+import static io.restassured.RestAssured.*;
+import static org.hamcrest.Matchers.*;
+
+public class ProductSteps {
+
+    @LocalServerPort
+    private int port;
+    
+    private String accessToken;
+    private Response response;
+
+    @Given("系統已初始化 {int} 筆預設商品")
+    public void initProducts(int count) {
+        RestAssured.baseURI = "http://localhost:" + port;
+        // 預設商品已透過 SQL 初始化
+    }
+
+    @Given("我以 {string} 身份登入")
+    public void loginAs(String username) {
+        accessToken = getAccessToken(username);
+    }
+
+    @When("我發送 GET 請求到 {string}")
+    public void sendGetRequest(String path) {
+        response = given()
+                .header("Authorization", "Bearer " + accessToken)
+                .when()
+                .get(path);
+    }
+
+    @When("我發送 POST 請求到 {string} 包含以下資料:")
+    public void sendPostRequest(String path, Map<String, String> data) {
+        response = given()
+                .header("Authorization", "Bearer " + accessToken)
+                .contentType("application/json")
+                .body(data)
+                .when()
+                .post(path);
+    }
+
+    @Then("應該回傳 HTTP {int}")
+    public void verifyStatusCode(int statusCode) {
+        response.then().statusCode(statusCode);
+    }
+
+    @Then("回應應包含 {int} 筆商品")
+    public void verifyProductCount(int count) {
+        response.then()
+                .body("data", hasSize(count));
+    }
+
+    private String getAccessToken(String username) {
+        // 從 Keycloak 取得 access token
+        return given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("client_id", "ecommerce-client")
+                .formParam("grant_type", "password")
+                .formParam("username", username)
+                .formParam("password", getPasswordForUser(username))
+                .when()
+                .post(keycloakTokenUrl)
+                .then()
+                .extract()
+                .path("access_token");
+    }
+}
+```
+
+---
+
+## 6. 驗證命令
+
+### 6.1 Phase 0: Monorepo 初始化驗證
+
+```bash
+# 1. 驗證 Gradle 設定
+./gradlew projects
+
+# 預期輸出:
+# Root project 'ecommerce-multitenant-poc'
+# +--- Project ':libs:common-lib'
+# +--- Project ':libs:security-lib'
+# +--- Project ':libs:tenant-lib'
+# +--- Project ':services:product-service'
+# +--- Project ':services:user-service'
+# +--- Project ':services:gateway-service'
+# \--- Project ':tests:scenario-tests'
+
+# 2. 驗證編譯
+./gradlew build
+
+# 3. 驗證模組依賴
+./gradlew :services:product-service:dependencies --configuration compileClasspath
+```
+
+### 6.2 Phase 2: 微服務驗證
+
+```bash
+# 1. 啟動服務
+./gradlew :services:product-service:bootRun
+
+# 2. 健康檢查
+curl http://localhost:8081/actuator/health
+
+# 3. Swagger UI
+open http://localhost:8081/swagger-ui.html
+```
+
+### 6.3 Phase 3: 測試驗證
+
+```bash
+# 1. 執行所有測試
+./gradlew test
+
+# 2. 執行情境測試
+./gradlew :tests:scenario-tests:test
+
+# 3. 產生測試覆蓋率報告
+./gradlew jacocoRootReport
+open build/reports/jacoco/jacocoRootReport/html/index.html
+```
+
+---
+
+## 附錄 A: 相關文件
+
+- [PRD.md](./PRD.md) - 產品需求文件
+- [INFRA.md](./INFRA.md) - 基礎設施文件
+
+---
+
+*— TECH 文件結束 —*

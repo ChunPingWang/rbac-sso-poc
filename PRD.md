@@ -1225,3 +1225,496 @@
 
 - [TECH.md](./TECH.md) - 技術架構文件
 - [INFRA.md](./INFRA.md) - 基礎設施文件
+# PRD: 電子商務多租戶平台 - 產品需求文件
+
+## 文件資訊
+
+| 項目 | 內容 |
+|------|------|
+| 文件版本 | 1.0 |
+| 建立日期 | 2026-01-10 |
+| 專案代號 | ECOMMERCE-MULTITENANT-POC |
+| 專案類型 | Monorepo (Gradle Multi-Module) |
+| 狀態 | 待實作 |
+
+---
+
+## 1. 專案概述
+
+### 1.1 專案目標
+
+建立一個支援多租戶（Multi-Tenant）的電子商務平台 POC，使用 Monorepo 架構管理多個微服務，實現完整的 RBAC（角色型存取控制）機制。
+
+### 1.2 核心功能
+
+| 功能模組 | 說明 |
+|----------|------|
+| 商品管理 | 商品 CRUD、分類管理 |
+| 使用者管理 | 帳號建立、角色指派 |
+| 多租戶隔離 | 租戶資料隔離、獨立管理 |
+| 權限控制 | RBAC 角色權限驗證 |
+
+---
+
+## 2. Monorepo 架構需求
+
+### 2.1 強制要求
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  🚨 Monorepo 強制規範                                                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  1. 所有微服務必須位於 services/ 目錄下                                   │
+│  2. 所有共用模組必須位於 libs/ 目錄下                                     │
+│  3. 每個微服務/模組必須是 Gradle sub-module                              │
+│  4. 禁止微服務之間直接依賴，必須透過 common-lib                           │
+│  5. 每個微服務必須有獨立的 build.gradle.kts                              │
+│  6. 根目錄 settings.gradle.kts 必須 include 所有模組                     │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.2 目錄結構規範
+
+```
+ecommerce-multitenant-poc/
+├── settings.gradle.kts              # Gradle 根設定 (include 所有模組)
+├── build.gradle.kts                 # 根 build 設定
+├── gradle.properties                # Gradle 屬性
+├── gradle/
+│   └── wrapper/
+│       └── gradle-wrapper.properties
+│
+├── libs/                            # 共用模組
+│   ├── common-lib/                  # 共用 DTO、工具類、例外處理
+│   │   ├── build.gradle.kts
+│   │   └── src/main/java/
+│   ├── security-lib/                # Spring Security 配置、JWT
+│   │   ├── build.gradle.kts
+│   │   └── src/main/java/
+│   └── tenant-lib/                  # 多租戶核心機制
+│       ├── build.gradle.kts
+│       └── src/main/java/
+│
+├── services/                        # 微服務
+│   ├── product-service/             # 商品服務
+│   │   ├── build.gradle.kts
+│   │   └── src/
+│   │       ├── main/java/
+│   │       └── test/java/
+│   ├── user-service/                # 使用者服務
+│   │   ├── build.gradle.kts
+│   │   └── src/
+│   │       ├── main/java/
+│   │       └── test/java/
+│   └── gateway-service/             # API Gateway
+│       ├── build.gradle.kts
+│       └── src/
+│
+├── infra/                           # 基礎設施配置
+│   ├── docker-compose.yml
+│   ├── keycloak/
+│   │   └── realm-export.json
+│   └── db/
+│       └── init.sql
+│
+├── docs/                            # 文件
+│   ├── PRD.md
+│   ├── TECH.md
+│   └── INFRA.md
+│
+└── tests/                           # 整合測試/情境測試
+    └── scenario-tests/
+        └── src/test/java/
+```
+
+### 2.3 Gradle Multi-Module 設定
+
+**settings.gradle.kts (根目錄)**
+```kotlin
+rootProject.name = "ecommerce-multitenant-poc"
+
+// 共用模組
+include("libs:common-lib")
+include("libs:security-lib")
+include("libs:tenant-lib")
+
+// 微服務
+include("services:product-service")
+include("services:user-service")
+include("services:gateway-service")
+
+// 整合測試
+include("tests:scenario-tests")
+```
+
+---
+
+## 3. 使用者角色與權限
+
+### 3.1 角色定義
+
+| 角色 | 代碼 | 說明 |
+|------|------|------|
+| 系統管理者 | ROLE_ADMIN | 完整系統權限 |
+| 租戶管理者 | ROLE_TENANT_ADMIN | 租戶內完整權限 |
+| 一般使用者 | ROLE_USER | 僅查詢權限 |
+
+### 3.2 權限矩陣
+
+| 功能 | ADMIN | TENANT_ADMIN | USER |
+|------|:-----:|:------------:|:----:|
+| 查詢商品 | ✅ | ✅ | ✅ |
+| 新增商品 | ✅ | ✅ | ❌ |
+| 修改商品 | ✅ | ✅ | ❌ |
+| 刪除商品 | ✅ | ✅ | ❌ |
+| 新增使用者 | ✅ | ✅ | ❌ |
+| 管理租戶 | ✅ | ❌ | ❌ |
+
+### 3.3 預設測試帳號
+
+| Username | Password | Role | Tenant |
+|----------|----------|------|--------|
+| admin | admin123 | ROLE_ADMIN | system |
+| tenant1.admin | tenant123 | ROLE_TENANT_ADMIN | tenant1 |
+| tenant1.user | user123 | ROLE_USER | tenant1 |
+| tenant2.admin | tenant123 | ROLE_TENANT_ADMIN | tenant2 |
+| tenant2.user | user123 | ROLE_USER | tenant2 |
+
+---
+
+## 4. 預設商品資料
+
+### 4.1 商品清單 (10 筆預設資料)
+
+| ID | 商品名稱 | 分類 | 價格 | 庫存 | Tenant |
+|----|----------|------|------|------|--------|
+| 1 | iPhone 15 Pro | 手機 | 35,900 | 100 | tenant1 |
+| 2 | MacBook Pro 14" | 筆電 | 59,900 | 50 | tenant1 |
+| 3 | AirPods Pro 2 | 配件 | 7,490 | 200 | tenant1 |
+| 4 | iPad Air | 平板 | 19,900 | 80 | tenant1 |
+| 5 | Apple Watch S9 | 穿戴 | 12,900 | 150 | tenant1 |
+| 6 | Samsung Galaxy S24 | 手機 | 27,900 | 120 | tenant2 |
+| 7 | Galaxy Tab S9 | 平板 | 24,900 | 60 | tenant2 |
+| 8 | Galaxy Buds3 | 配件 | 5,490 | 180 | tenant2 |
+| 9 | Galaxy Watch 6 | 穿戴 | 9,990 | 100 | tenant2 |
+| 10 | Galaxy Book3 | 筆電 | 42,900 | 40 | tenant2 |
+
+---
+
+## 5. 情境測試規格 (Gherkin)
+
+### 5.1 商品管理情境
+
+#### Feature: 商品查詢
+
+```gherkin
+Feature: 商品查詢功能
+  作為平台使用者
+  我希望能夠查詢商品
+  以便了解可購買的商品資訊
+
+  Background:
+    Given 系統已初始化 10 筆預設商品
+    And 存在預設的管理者帳號 "admin"
+
+  Scenario: 管理者查詢所有商品
+    Given 我以 "admin" 身份登入
+    When 我發送 GET 請求到 "/api/products"
+    Then 應該回傳 HTTP 200
+    And 回應應包含 10 筆商品
+
+  Scenario: 一般使用者查詢租戶商品
+    Given 我以 "tenant1.user" 身份登入
+    When 我發送 GET 請求到 "/api/products"
+    Then 應該回傳 HTTP 200
+    And 回應應只包含 tenant1 的 5 筆商品
+
+  Scenario: 使用者查詢單一商品
+    Given 我以 "tenant1.user" 身份登入
+    When 我發送 GET 請求到 "/api/products/1"
+    Then 應該回傳 HTTP 200
+    And 回應應包含商品名稱 "iPhone 15 Pro"
+
+  Scenario: 使用者無法查詢其他租戶商品
+    Given 我以 "tenant1.user" 身份登入
+    When 我發送 GET 請求到 "/api/products/6"
+    Then 應該回傳 HTTP 403
+```
+
+#### Feature: 商品新增
+
+```gherkin
+Feature: 商品新增功能
+  作為管理者
+  我希望能夠新增商品
+  以便擴充商品目錄
+
+  Background:
+    Given 存在預設的管理者帳號 "admin"
+    And 存在預設的租戶管理者帳號 "tenant1.admin"
+    And 存在預設的一般使用者帳號 "tenant1.user"
+
+  Scenario: 管理者新增商品成功
+    Given 我以 "admin" 身份登入
+    When 我發送 POST 請求到 "/api/products" 包含以下資料:
+      | name       | category | price  | stock |
+      | 新商品     | 其他     | 9999   | 10    |
+    Then 應該回傳 HTTP 201
+    And 回應應包含新建立的商品 ID
+
+  Scenario: 租戶管理者新增商品成功
+    Given 我以 "tenant1.admin" 身份登入
+    When 我發送 POST 請求到 "/api/products" 包含以下資料:
+      | name       | category | price  | stock |
+      | 租戶商品   | 電子     | 5000   | 20    |
+    Then 應該回傳 HTTP 201
+    And 商品應自動歸屬於 tenant1
+
+  Scenario: 一般使用者無法新增商品
+    Given 我以 "tenant1.user" 身份登入
+    When 我發送 POST 請求到 "/api/products" 包含以下資料:
+      | name       | category | price  | stock |
+      | 非法商品   | 其他     | 1000   | 5     |
+    Then 應該回傳 HTTP 403
+    And 錯誤訊息應為 "Access Denied"
+```
+
+#### Feature: 商品修改
+
+```gherkin
+Feature: 商品修改功能
+  作為管理者
+  我希望能夠修改商品資訊
+  以便維護商品資料正確性
+
+  Background:
+    Given 系統已初始化 10 筆預設商品
+    And 存在預設的管理者帳號
+
+  Scenario: 管理者修改商品成功
+    Given 我以 "admin" 身份登入
+    When 我發送 PUT 請求到 "/api/products/1" 包含以下資料:
+      | price | 39900 |
+    Then 應該回傳 HTTP 200
+    And 商品 1 的價格應為 39900
+
+  Scenario: 租戶管理者只能修改自己租戶的商品
+    Given 我以 "tenant1.admin" 身份登入
+    When 我發送 PUT 請求到 "/api/products/6" 包含以下資料:
+      | price | 25000 |
+    Then 應該回傳 HTTP 403
+
+  Scenario: 一般使用者無法修改商品
+    Given 我以 "tenant1.user" 身份登入
+    When 我發送 PUT 請求到 "/api/products/1" 包含以下資料:
+      | price | 30000 |
+    Then 應該回傳 HTTP 403
+```
+
+#### Feature: 商品刪除
+
+```gherkin
+Feature: 商品刪除功能
+  作為管理者
+  我希望能夠刪除商品
+  以便移除不需要的商品
+
+  Background:
+    Given 系統已初始化 10 筆預設商品
+
+  Scenario: 管理者刪除商品成功
+    Given 我以 "admin" 身份登入
+    When 我發送 DELETE 請求到 "/api/products/1"
+    Then 應該回傳 HTTP 204
+    And 商品 1 應標記為已刪除
+
+  Scenario: 租戶管理者只能刪除自己租戶的商品
+    Given 我以 "tenant1.admin" 身份登入
+    When 我發送 DELETE 請求到 "/api/products/6"
+    Then 應該回傳 HTTP 403
+
+  Scenario: 一般使用者無法刪除商品
+    Given 我以 "tenant1.user" 身份登入
+    When 我發送 DELETE 請求到 "/api/products/1"
+    Then 應該回傳 HTTP 403
+```
+
+### 5.2 使用者管理情境
+
+#### Feature: 使用者管理
+
+```gherkin
+Feature: 使用者管理功能
+  作為管理者
+  我希望能夠管理使用者
+  以便控制系統存取權限
+
+  Background:
+    Given 存在預設的管理者帳號
+
+  Scenario: 管理者新增一般使用者
+    Given 我以 "admin" 身份登入
+    When 我發送 POST 請求到 "/api/users" 包含以下資料:
+      | username      | password  | role      | tenant  |
+      | new.user      | pass123   | ROLE_USER | tenant1 |
+    Then 應該回傳 HTTP 201
+    And 新使用者應成功建立
+
+  Scenario: 租戶管理者只能在自己租戶內新增使用者
+    Given 我以 "tenant1.admin" 身份登入
+    When 我發送 POST 請求到 "/api/users" 包含以下資料:
+      | username      | password  | role      | tenant  |
+      | tenant.user2  | pass123   | ROLE_USER | tenant1 |
+    Then 應該回傳 HTTP 201
+    And 新使用者應歸屬於 tenant1
+
+  Scenario: 租戶管理者無法新增其他租戶使用者
+    Given 我以 "tenant1.admin" 身份登入
+    When 我發送 POST 請求到 "/api/users" 包含以下資料:
+      | username      | password  | role      | tenant  |
+      | hack.user     | pass123   | ROLE_USER | tenant2 |
+    Then 應該回傳 HTTP 403
+
+  Scenario: 一般使用者無法新增使用者
+    Given 我以 "tenant1.user" 身份登入
+    When 我發送 POST 請求到 "/api/users" 包含以下資料:
+      | username      | password  | role      | tenant  |
+      | illegal.user  | pass123   | ROLE_USER | tenant1 |
+    Then 應該回傳 HTTP 403
+```
+
+### 5.3 多租戶隔離情境
+
+#### Feature: 租戶資料隔離
+
+```gherkin
+Feature: 多租戶資料隔離
+  作為平台
+  我需要確保租戶資料完全隔離
+  以保障資料安全性
+
+  Background:
+    Given 系統已初始化 10 筆預設商品
+    And 商品 1-5 屬於 tenant1
+    And 商品 6-10 屬於 tenant2
+
+  Scenario: Tenant1 使用者只能看到 Tenant1 資料
+    Given 我以 "tenant1.user" 身份登入
+    When 我發送 GET 請求到 "/api/products"
+    Then 應該回傳 HTTP 200
+    And 回應應只包含 5 筆商品
+    And 所有商品的 tenantId 應為 "tenant1"
+
+  Scenario: Tenant2 使用者只能看到 Tenant2 資料
+    Given 我以 "tenant2.user" 身份登入
+    When 我發送 GET 請求到 "/api/products"
+    Then 應該回傳 HTTP 200
+    And 回應應只包含 5 筆商品
+    And 所有商品的 tenantId 應為 "tenant2"
+
+  Scenario: 系統管理者可以看到所有租戶資料
+    Given 我以 "admin" 身份登入
+    When 我發送 GET 請求到 "/api/products"
+    Then 應該回傳 HTTP 200
+    And 回應應包含 10 筆商品
+
+  Scenario: 跨租戶存取應被拒絕
+    Given 我以 "tenant1.user" 身份登入
+    When 我嘗試直接存取 tenant2 的資料
+    Then 應該回傳 HTTP 403
+    And 存取記錄應記錄此安全事件
+```
+
+---
+
+## 6. API 規格
+
+### 6.1 商品服務 API
+
+| Method | Endpoint | 說明 | 權限 |
+|--------|----------|------|------|
+| GET | /api/products | 查詢商品列表 | USER, ADMIN |
+| GET | /api/products/{id} | 查詢單一商品 | USER, ADMIN |
+| POST | /api/products | 新增商品 | ADMIN |
+| PUT | /api/products/{id} | 修改商品 | ADMIN |
+| DELETE | /api/products/{id} | 刪除商品 | ADMIN |
+
+### 6.2 使用者服務 API
+
+| Method | Endpoint | 說明 | 權限 |
+|--------|----------|------|------|
+| GET | /api/users | 查詢使用者列表 | ADMIN |
+| GET | /api/users/{id} | 查詢單一使用者 | ADMIN |
+| POST | /api/users | 新增使用者 | ADMIN |
+| PUT | /api/users/{id} | 修改使用者 | ADMIN |
+| DELETE | /api/users/{id} | 刪除使用者 | ADMIN |
+
+---
+
+## 7. 驗收標準
+
+### 7.1 Phase 0: Monorepo 初始化
+
+- [ ] 根目錄 settings.gradle.kts 正確 include 所有模組
+- [ ] 根目錄 build.gradle.kts 設定完成
+- [ ] 所有子模組可獨立編譯
+- [ ] `./gradlew build` 全部通過
+
+### 7.2 Phase 1: 基礎設施
+
+- [ ] Docker Compose 可啟動所有服務
+- [ ] Keycloak 初始化完成
+- [ ] 預設帳號可登入
+- [ ] 資料庫初始化完成
+
+### 7.3 Phase 2: 微服務開發
+
+- [ ] Product Service 完成 CRUD
+- [ ] User Service 完成使用者管理
+- [ ] Gateway Service 路由設定完成
+- [ ] 多租戶隔離機制實作完成
+
+### 7.4 Phase 3: 測試與驗收
+
+- [ ] 單元測試覆蓋率 > 80%
+- [ ] 所有情境測試通過
+- [ ] 權限控制測試通過
+- [ ] 多租戶隔離測試通過
+- [ ] 10 筆預設商品正確初始化
+
+---
+
+## 8. AI 實作指引
+
+### 8.1 強制執行順序
+
+```
+Phase 0 (Monorepo) → Phase 1 (INFRA) → Phase 2 (Services) → Phase 3 (Tests)
+       │                    │                   │                  │
+       ▼                    ▼                   ▼                  ▼
+    驗證編譯            驗證容器            驗證 API           驗證測試
+```
+
+### 8.2 禁止事項
+
+```
+❌ 跳過 Phase 0 直接開發服務
+❌ 未設定 Gradle multi-module 就開始編碼
+❌ 微服務之間直接引用（必須透過 common-lib）
+❌ 在未完成 INFRA 前開始微服務開發
+❌ 跳過情境測試
+❌ 未初始化預設資料就進行測試
+```
+
+---
+
+## 附錄 A: 相關文件
+
+- [TECH.md](./TECH.md) - 技術架構文件
+- [INFRA.md](./INFRA.md) - 基礎設施文件
+
+---
+
+*— PRD 文件結束 —*
