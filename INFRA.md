@@ -1461,3 +1461,51 @@ flowchart TD
     J -->|是| K[提交程式碼]
     J -->|否| F
 ```
+
+---
+
+## 12. 實作狀態
+
+### 12.1 分支策略
+
+| 分支 | 稽核機制 | 說明 |
+|------|----------|------|
+| `main` | Spring AOP | 使用 `@Auditable` 註解 |
+| `domain-event-for-audit` | Domain Events | 使用領域事件發布 |
+
+> **重要**: 兩個分支的稽核機制是不可變的設計決策。除稽核機制外，所有功能完全一致。
+
+### 12.2 測試統計
+
+| 模組 | 測試數 | 覆蓋率 | 狀態 |
+|------|--------|--------|------|
+| product-service | 124+ | 96% | ✅ |
+| user-service | 10+ | 96% | ✅ |
+| gateway-service | 10+ | 92% | ✅ |
+| audit-lib | 150+ | 67% | ⚠️ |
+| scenario-tests | 18 scenarios | - | ✅ |
+| **總計** | **350+** | **80%+** | ✅ |
+
+### 12.3 已完成基礎設施
+
+| 組件 | 狀態 | 說明 |
+|------|------|------|
+| Docker Compose 開發環境 | ✅ | keycloak, postgres, openldap |
+| Kubernetes 部署腳本 | ✅ | kustomize, blue-green |
+| OpenLDAP 初始化 | ✅ | bootstrap.ldif |
+| Keycloak Realm 配置 | ✅ | LDAP federation, group mapping |
+| Gradle 多模組專案 | ✅ | 共用函式庫 + 微服務 |
+| 壓力測試腳本 | ✅ | load-test.sh |
+| 本地開發腳本 | ✅ | start-local.sh |
+
+---
+
+## 附錄 A: 相關文件
+
+- [PRD.md](./PRD.md) - 產品需求文件
+- [TECH.md](./TECH.md) - 技術架構文件
+- [README.md](./README.md) - 專案說明
+
+---
+
+*— INFRA 文件結束 —*

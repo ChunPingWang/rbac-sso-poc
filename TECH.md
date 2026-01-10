@@ -2936,10 +2936,74 @@ open build/reports/jacoco/jacocoRootReport/html/index.html
 
 ---
 
+## 7. 實作狀態
+
+### 7.1 分支與稽核機制
+
+本專案採用兩個分支策略，唯一差異在於稽核日誌實作機制：
+
+| 分支 | 稽核機制 | 技術實作 | 適用場景 |
+|------|----------|----------|----------|
+| `main` | Spring AOP | `@Auditable` + `AuditAspect` | 快速整合、橫切關注點分離 |
+| `domain-event-for-audit` | Domain Events | `DomainEvent` + `EventListener` | 細粒度控制、事件驅動架構 |
+
+> **設計原則**: 兩個分支的稽核機制差異是架構層級的不可變決策。
+
+### 7.2 Spring AOP 稽核 (main 分支)
+
+```java
+// 使用方式
+@Auditable(eventType = AuditEventType.CREATE_PRODUCT)
+public UUID handle(CreateProductCommand cmd) {
+    // 業務邏輯 - 稽核透過 AOP 自動攔截
+}
+```
+
+### 7.3 Domain Event 稽核 (domain-event-for-audit 分支)
+
+```java
+// 使用方式
+public UUID handle(CreateProductCommand cmd) {
+    Product product = Product.create(...);
+    eventPublisher.publish(product.pullDomainEvents());
+    // ProductCreated 事件由 AuditDomainEventListener 捕獲
+}
+```
+
+### 7.4 測試覆蓋率
+
+| 模組 | 指令覆蓋率 | 分支覆蓋率 | 狀態 |
+|------|------------|------------|------|
+| product-service | 96% | 75% | ✅ |
+| user-service | 96% | N/A | ✅ |
+| gateway-service | 92% | N/A | ✅ |
+| audit-lib | 67% | N/A | ⚠️ |
+| 整體 | 80%+ | - | ✅ 達標 |
+
+### 7.5 功能完成度
+
+| 功能 | 狀態 | 說明 |
+|------|------|------|
+| Hexagonal Architecture | ✅ | 所有服務採用 Ports & Adapters |
+| DDD Domain Model | ✅ | Aggregates, Value Objects, Domain Events |
+| CQRS Pattern | ✅ | 分離 Command/Query Services |
+| Multi-tenant | ✅ | TenantContext + JWT tenant_id claim |
+| RBAC | ✅ | @PreAuthorize + Keycloak Roles |
+| OAuth2/OIDC | ✅ | Keycloak Integration |
+| LDAP Federation | ✅ | OpenLDAP + Keycloak User Federation |
+| Audit Logging | ✅ | 雙機制 (AOP / Domain Events) |
+| API Gateway | ✅ | Spring Cloud Gateway |
+| BDD Tests | ✅ | Cucumber + Chinese Gherkin |
+| Architecture Tests | ✅ | ArchUnit |
+
+---
+
 ## 附錄 A: 相關文件
 
 - [PRD.md](./PRD.md) - 產品需求文件
 - [INFRA.md](./INFRA.md) - 基礎設施文件
+- [specs/001-shared-audit-lib](./specs/001-shared-audit-lib/) - 稽核函式庫規格
+- [specs/002-multi-tenant-ecommerce](./specs/002-multi-tenant-ecommerce/) - 多租戶電商平台規格
 
 ---
 
