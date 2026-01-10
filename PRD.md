@@ -1175,11 +1175,32 @@
 
 ### 8.5 契約測試驗收 (Consumer-Driven Contract)
 
-- [ ] 使用 Spring Cloud Contract 定義 API 契約
-- [ ] Provider 端自動產生並執行契約測試
-- [ ] 產生 Stubs JAR 供 Consumer 端使用
-- [ ] 契約涵蓋所有公開 API 端點（查詢、錯誤處理）
+- [x] 使用 Spring Cloud Contract 定義 API 契約
+- [x] Provider 端自動產生並執行契約測試
+- [x] 產生 Stubs JAR 供 Consumer 端使用
+- [x] 契約涵蓋所有公開 API 端點（查詢、錯誤處理）
 - [ ] 契約測試整合至 CI/CD 流程
+
+### 8.6 安全管控驗收
+
+#### 南北向安全 (North-South)
+
+- [x] OAuth2 Resource Server 配置 (JWT 驗證)
+- [x] Keycloak Realm Role 提取與轉換
+- [x] CORS 配置支援跨域請求
+- [x] 端點授權 (@PreAuthorize) 保護稽核 API
+- [x] 公開端點白名單 (Actuator health/info)
+- [x] 可配置的安全屬性 (SecurityProperties)
+- [ ] TLS/HTTPS 加密傳輸
+
+#### 東西向安全 (East-West)
+
+- [x] OAuth2 Client Credentials Flow 實作
+- [x] ServiceTokenProvider Token 取得與快取
+- [x] ServiceAuthInterceptor 請求攔截器
+- [x] 預配置 RestTemplate (serviceRestTemplate)
+- [ ] mTLS 雙向憑證驗證
+- [ ] Kubernetes NetworkPolicy 網路隔離
 
 ---
 

@@ -38,8 +38,10 @@ dependencies {
     // Spring Cloud for @RefreshScope (dynamic config reload)
     compileOnly 'org.springframework.cloud:spring-cloud-context:4.1.4'
 
-    // Security (for extracting user context)
+    // Security (for extracting user context and OAuth2 Resource Server)
     compileOnly 'org.springframework.boot:spring-boot-starter-security'
+    compileOnly 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    compileOnly 'org.springframework.security:spring-security-oauth2-jose'
 
     // Micrometer for metrics
     api 'io.micrometer:micrometer-core'

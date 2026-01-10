@@ -29,6 +29,8 @@ audit:
       - password
       - secret
       - token
+  security:
+    enabled: false  # Disable security for unit tests
 
 logging:
   level:

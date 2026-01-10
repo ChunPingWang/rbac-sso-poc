@@ -1,1 +1,3 @@
 com.example.audit.infrastructure.config.AuditAutoConfiguration
+com.example.audit.infrastructure.config.SecurityAutoConfiguration
+com.example.audit.infrastructure.config.ServiceAuthConfiguration

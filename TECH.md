@@ -787,7 +787,216 @@ public class JpaProductRepository implements ProductRepository {
 
 ---
 
-## 6. 架構測試 (ArchUnit)
+## 6. 安全架構
+
+### 6.1 安全架構總覽
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           Security Architecture                                  │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────────┐ │
+│  │                    NORTH-SOUTH (外部 → 內部)                               │ │
+│  │                                                                             │ │
+│  │   Client ──► Gateway ──► OAuth2 Resource Server ──► @PreAuthorize ──► API  │ │
+│  │              (CORS)       (JWT Validation)          (Role Check)            │ │
+│  │                                                                             │ │
+│  │   Token Flow:                                                               │ │
+│  │   1. Client 向 Keycloak 取得 JWT Token                                      │ │
+│  │   2. Client 在 Authorization Header 附帶 Bearer Token                       │ │
+│  │   3. Resource Server 驗證 Token 簽章與有效期                                │ │
+│  │   4. 從 Token 中提取 Realm Roles → Spring Security Authorities              │ │
+│  │   5. @PreAuthorize 檢查角色權限                                             │ │
+│  └────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────────┐ │
+│  │                    EAST-WEST (服務 → 服務)                                 │ │
+│  │                                                                             │ │
+│  │   Service A ──► ServiceTokenProvider ──► OAuth2 Client Credentials ──►     │ │
+│  │                 (Get Token)              (Token Endpoint)                   │ │
+│  │                                                                             │ │
+│  │              ──► ServiceAuthInterceptor ──► Service B                       │ │
+│  │                  (Add Bearer Token)                                         │ │
+│  │                                                                             │ │
+│  │   Token Caching:                                                            │ │
+│  │   • 自動快取 Token，過期前 60 秒自動刷新                                     │ │
+│  │   • Thread-safe 設計，支援高併發                                            │ │
+│  └────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.2 安全配置
+
+#### SecurityProperties 配置
+
+```yaml
+# application.yml
+audit:
+  security:
+    enabled: true
+    issuer-uri: http://localhost:8180/realms/ecommerce
+    # jwk-set-uri: http://localhost:8180/realms/ecommerce/protocol/openid-connect/certs
+
+    # CORS 配置
+    cors:
+      enabled: true
+      allowed-origins:
+        - http://localhost:3000
+        - http://localhost:8080
+      allowed-methods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+      allowed-headers:
+        - Authorization
+        - Content-Type
+        - X-Correlation-ID
+      allow-credentials: true
+      max-age: 3600
+
+    # 公開端點（不需認證）
+    public-paths:
+      - /actuator/health
+      - /actuator/health/**
+      - /actuator/info
+
+    # 可存取稽核日誌的角色
+    audit-roles:
+      - ADMIN
+      - AUDITOR
+
+# 服務間認證 (East-West)
+  service-auth:
+    enabled: true
+    client-id: my-service-client
+    client-secret: ${SERVICE_CLIENT_SECRET}
+```
+
+#### SecurityAutoConfiguration
+
+```java
+// 自動配置 OAuth2 Resource Server
+@AutoConfiguration
+@ConditionalOnProperty(name = "audit.security.enabled", havingValue = "true")
+public class SecurityAutoConfiguration {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(AbstractHttpConfigurer::disable)
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+            .sessionManagement(session ->
+                session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/actuator/**").permitAll()
+                .requestMatchers("/api/v1/audit-logs/**").authenticated()
+                .anyRequest().authenticated()
+            )
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
+            );
+        return http.build();
+    }
+
+    @Bean
+    public JwtDecoder jwtDecoder() {
+        return JwtDecoders.fromIssuerLocation(issuerUri);
+    }
+}
+```
+
+#### Keycloak Role Mapping
+
+```java
+// 從 Keycloak JWT 提取角色
+class KeycloakRealmRoleConverter implements Converter<Jwt, Collection<GrantedAuthority>> {
+
+    @Override
+    public Collection<GrantedAuthority> convert(Jwt jwt) {
+        // JWT 結構:
+        // {
+        //   "realm_access": { "roles": ["ADMIN", "USER"] },
+        //   "resource_access": { "my-client": { "roles": ["manage"] } }
+        // }
+
+        Map<String, Object> realmAccess = jwt.getClaimAsMap("realm_access");
+        List<String> roles = (List<String>) realmAccess.get("roles");
+
+        return roles.stream()
+            .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
+            .collect(toList());
+    }
+}
+```
+
+### 6.3 端點授權
+
+```java
+// AuditQueryController.java
+@RestController
+@RequestMapping("/api/v1/audit-logs")
+@PreAuthorize("hasAnyRole('ADMIN', 'AUDITOR') or hasAuthority('SCOPE_audit:read')")
+public class AuditQueryController {
+
+    @GetMapping
+    public ResponseEntity<PagedResponse<AuditLogView>> queryAuditLogs(...) {
+        // 需要 ADMIN、AUDITOR 角色，或 audit:read scope
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<AuditLogView> getAuditLogById(@PathVariable UUID id) {
+        // 同上
+    }
+}
+```
+
+### 6.4 服務間認證 (East-West)
+
+```java
+// 使用預配置的 RestTemplate
+@Service
+public class ProductService {
+
+    private final RestTemplate serviceRestTemplate; // 自動注入
+
+    public ProductService(RestTemplate serviceRestTemplate) {
+        this.serviceRestTemplate = serviceRestTemplate;
+    }
+
+    public Product getProduct(UUID id) {
+        // 請求自動附帶 Bearer Token
+        return serviceRestTemplate.getForObject(
+            "http://product-service/api/products/" + id,
+            Product.class
+        );
+    }
+}
+
+// 或手動使用 ServiceTokenProvider
+@Service
+public class ManualAuthService {
+
+    private final ServiceTokenProvider tokenProvider;
+    private final RestTemplate restTemplate;
+
+    public void callService() {
+        String token = tokenProvider.getToken()
+            .orElseThrow(() -> new SecurityException("No token"));
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(token);
+
+        restTemplate.exchange(url, GET, new HttpEntity<>(headers), Response.class);
+    }
+}
+```
+
+---
+
+## 7. 架構測試 (ArchUnit)
 
 ```java
 // test/architecture/ArchitectureTest.java

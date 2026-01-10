@@ -5,6 +5,7 @@ import com.example.audit.application.dto.PagedResponse;
 import com.example.audit.application.service.AuditQueryService;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -16,9 +17,17 @@ import java.util.UUID;
  *
  * <p>Provides read-only access to audit logs for compliance and security review.
  * Per the API contract (audit-api.yaml), this controller only supports GET operations.</p>
+ *
+ * <p>Access Control:</p>
+ * <ul>
+ *   <li>All endpoints require authentication</li>
+ *   <li>Requires ADMIN or AUDITOR role</li>
+ *   <li>Service accounts with audit:read scope are also permitted</li>
+ * </ul>
  */
 @RestController
 @RequestMapping("/api/v1/audit-logs")
+@PreAuthorize("hasAnyRole('ADMIN', 'AUDITOR') or hasAuthority('SCOPE_audit:read')")
 public class AuditQueryController {
 
     private final AuditQueryService queryService;
