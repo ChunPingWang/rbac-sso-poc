@@ -1,168 +1,178 @@
-# INFRA: 基礎設施部署文件
+# INFRA: 基礎設施與部署文件
 
 ## 文件資訊
 
 | 項目 | 內容 |
 |------|------|
-| 文件版本 | 1.0 |
-| 建立日期 | 2025-01-10 |
-| 專案代號 | SSO-RBAC-POC |
-| 適用範圍 | Infrastructure Components |
+| 文件版本 | 3.1 |
+| 建立日期 | 2026-01-10 |
+| 最後更新 | 2026-01-10 |
+| 專案代號 | ECOMMERCE-MSA-POC |
+| 適用範圍 | Infrastructure & Deployment |
 
 ---
 
-## 1. 基礎設施架構
+## 1. 環境總覽
 
-### 1.1 架構總覽
+### 1.1 部署環境對照
 
+| 環境 | 用途 | 部署方式 | 資料庫 | SSO |
+|------|------|----------|--------|-----|
+| Local | 開發 | IDE / Gradle | H2 Memory | Keycloak (Docker) |
+| Docker | 整合測試 | Docker Compose | H2 File | Keycloak (Docker) |
+| SIT | 系統整合 | Kubernetes | PostgreSQL | Keycloak (K8s) |
+| UAT | 使用者驗收 | Kubernetes | PostgreSQL | Keycloak (K8s) |
+| Production | 正式環境 | Kubernetes | PostgreSQL | Keycloak (K8s) |
+
+### 1.2 架構圖
+
+```mermaid
+flowchart TB
+    subgraph Client["Client"]
+        C[Browser / App]
+    end
+
+    subgraph Ingress["Ingress Layer"]
+        IG[NGINX / Traefik]
+    end
+
+    subgraph K8s["Kubernetes Cluster"]
+        subgraph Gateway["Gateway Layer"]
+            GW[Spring Cloud Gateway<br/>Blue/Green Deployment]
+        end
+
+        subgraph Services["Microservices"]
+            US[User Service<br/>Blue/Green]
+            PS[Product Service<br/>Blue/Green]
+        end
+
+        subgraph Database["Database"]
+            PG[(PostgreSQL<br/>StatefulSet + PVC)]
+        end
+    end
+
+    subgraph Identity["Identity Management"]
+        KC[Keycloak<br/>SSO / OAuth2]
+        LDAP[(OpenLDAP<br/>User Directory)]
+    end
+
+    C --> IG
+    IG --> GW
+    GW --> US
+    GW --> PS
+    US --> PG
+    PS --> PG
+    KC <-->|LDAP| LDAP
+    GW -.->|Auth| KC
 ```
-┌────────────────────────────────────────────────────────────────────────────────┐
-│                         Docker Compose Environment                              │
-│                            Network: sso-network                                 │
-├────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                 │
-│  ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐        │
-│  │                 │      │                 │      │                 │        │
-│  │    OpenLDAP     │◀────▶│    Keycloak     │◀────▶│   PostgreSQL    │        │
-│  │                 │ LDAP │                 │ JDBC │                 │        │
-│  │   Port: 389     │      │   Port: 8080    │      │   Port: 5432    │        │
-│  │                 │      │                 │      │   (internal)    │        │
-│  └─────────────────┘      └─────────────────┘      └─────────────────┘        │
-│           │                        │                                           │
-│           │                        │                                           │
-│  ┌─────────────────┐      ┌─────────────────┐                                 │
-│  │                 │      │                 │                                 │
-│  │  phpLDAPadmin   │      │   Spring API    │                                 │
-│  │                 │      │                 │                                 │
-│  │   Port: 8081    │      │   Port: 9090    │                                 │
-│  │                 │      │                 │                                 │
-│  └─────────────────┘      └─────────────────┘                                 │
-│                                                                                 │
-└────────────────────────────────────────────────────────────────────────────────┘
-
-External Access:
-├── http://localhost:8080  → Keycloak Admin Console
-├── http://localhost:8081  → phpLDAPadmin
-├── http://localhost:9090  → Spring Boot API
-└── ldap://localhost:389   → OpenLDAP
-```
-
-### 1.2 元件版本
-
-| Component | Image | Version | Purpose |
-|-----------|-------|---------|---------|
-| OpenLDAP | osixia/openldap | 1.5.0 | User Directory |
-| phpLDAPadmin | osixia/phpldapadmin | 0.9.0 | LDAP Admin UI |
-| PostgreSQL | postgres | 15-alpine | Keycloak Database |
-| Keycloak | quay.io/keycloak/keycloak | 24.0 | Identity Provider |
-| Spring API | Custom Build | - | Application |
 
 ---
 
 ## 2. 目錄結構
 
 ```
-sso-rbac-poc/
-├── docker-compose.yml              # 主要編排檔案
-├── .env                            # 環境變數
-├── PRD.md                          # 業務需求文件
-├── TECH.md                         # 技術架構文件
-├── INFRA.md                        # 基礎設施文件（本文件）
+ecommerce-msa/
+├── deploy/
+│   ├── docker/
+│   │   ├── docker-compose.yml           # 完整環境
+│   │   ├── docker-compose.infra.yml     # 僅基礎設施（本地開發）
+│   │   └── .env                         # 環境變數
+│   │
+│   ├── k8s/
+│   │   ├── base/                        # 基礎配置
+│   │   │   ├── namespace.yaml
+│   │   │   ├── configmap.yaml
+│   │   │   ├── secrets.yaml
+│   │   │   ├── gateway/
+│   │   │   ├── user-service/
+│   │   │   ├── product-service/
+│   │   │   └── kustomization.yaml
+│   │   │
+│   │   ├── overlays/                    # 環境覆蓋
+│   │   │   ├── sit/
+│   │   │   ├── uat/
+│   │   │   └── prod/
+│   │   │
+│   │   └── blue-green/                  # 藍綠部署
+│   │       ├── deployment-blue.yaml
+│   │       ├── deployment-green.yaml
+│   │       └── service.yaml
+│   │
+│   └── scripts/
+│       ├── build-all.sh
+│       ├── docker-up.sh
+│       ├── docker-down.sh
+│       ├── k8s-deploy.sh
+│       ├── blue-green-deploy.sh
+│       ├── blue-green-switch.sh
+│       └── blue-green-verify.sh
 │
-├── ldap/                           # OpenLDAP 配置
-│   ├── bootstrap.ldif              # 初始化資料
-│   └── schema/                     # 自訂 Schema（如需）
-│
-├── keycloak/                       # Keycloak 配置
-│   ├── realm-export.json           # Realm 匯出配置
-│   └── themes/                     # 自訂主題（如需）
-│
-├── spring-api/                     # Spring Boot 應用
-│   ├── src/
-│   ├── Dockerfile
-│   └── pom.xml
-│
-└── scripts/                        # 工具腳本
-    ├── setup.sh                    # 環境初始化
-    ├── cleanup.sh                  # 環境清理
-    └── test-api.sh                 # API 測試
+└── infra/
+    ├── ldap/
+    │   └── bootstrap.ldif
+    └── keycloak/
+        └── realm-export.json
 ```
 
 ---
 
 ## 3. Docker Compose 配置
 
-### 3.1 docker-compose.yml
+### 3.1 docker-compose.yml (完整環境)
 
 ```yaml
-# docker-compose.yml
+# deploy/docker/docker-compose.yml
 version: '3.8'
 
 services:
   # ============================================================
-  # OpenLDAP - User Directory Service
+  # OpenLDAP
   # ============================================================
   openldap:
     image: osixia/openldap:1.5.0
-    container_name: sso-openldap
-    hostname: openldap
-    restart: unless-stopped
+    container_name: ecommerce-openldap
     environment:
-      # 組織設定
-      LDAP_ORGANISATION: "Example Corporation"
-      LDAP_DOMAIN: "example.com"
-      LDAP_BASE_DN: "dc=example,dc=com"
-      # 管理員密碼
+      LDAP_ORGANISATION: "E-Commerce Corp"
+      LDAP_DOMAIN: "ecommerce.local"
+      LDAP_BASE_DN: "dc=ecommerce,dc=local"
       LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD:-admin123}
-      LDAP_CONFIG_PASSWORD: ${LDAP_CONFIG_PASSWORD:-config123}
-      # TLS 設定（PoC 停用）
       LDAP_TLS: "false"
-      LDAP_TLS_VERIFY_CLIENT: "never"
-      # 日誌
-      LDAP_LOG_LEVEL: 256
     ports:
-      - "${LDAP_PORT:-389}:389"
-      - "${LDAPS_PORT:-636}:636"
+      - "389:389"
     volumes:
-      # 資料持久化
       - ldap_data:/var/lib/ldap
       - ldap_config:/etc/ldap/slapd.d
-      # 初始化資料
-      - ./ldap/bootstrap.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/bootstrap.ldif
+      - ../../infra/ldap/bootstrap.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/bootstrap.ldif
     networks:
-      - sso-network
+      - ecommerce-network
     healthcheck:
-      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://localhost", "-b", "dc=example,dc=com", "-D", "cn=admin,dc=example,dc=com", "-w", "${LDAP_ADMIN_PASSWORD:-admin123}"]
+      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://localhost", "-b", "dc=ecommerce,dc=local"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
 
   # ============================================================
-  # phpLDAPadmin - LDAP Web Administration UI
+  # phpLDAPadmin
   # ============================================================
   phpldapadmin:
     image: osixia/phpldapadmin:0.9.0
-    container_name: sso-phpldapadmin
-    restart: unless-stopped
+    container_name: ecommerce-phpldapadmin
     environment:
       PHPLDAPADMIN_LDAP_HOSTS: openldap
       PHPLDAPADMIN_HTTPS: "false"
     ports:
-      - "${PHPLDAPADMIN_PORT:-8081}:80"
+      - "8181:80"
     depends_on:
-      openldap:
-        condition: service_healthy
+      - openldap
     networks:
-      - sso-network
+      - ecommerce-network
 
   # ============================================================
-  # PostgreSQL - Keycloak Database
+  # PostgreSQL (Keycloak)
   # ============================================================
   postgres:
     image: postgres:15-alpine
-    container_name: sso-postgres
-    restart: unless-stopped
+    container_name: ecommerce-postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-keycloak}
       POSTGRES_USER: ${POSTGRES_USER:-keycloak}
@@ -170,196 +180,234 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - sso-network
+      - ecommerce-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-keycloak} -d ${POSTGRES_DB:-keycloak}"]
+      test: ["CMD-SHELL", "pg_isready -U keycloak"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
 
   # ============================================================
-  # Keycloak - Identity Provider & SSO Server
+  # Keycloak
   # ============================================================
   keycloak:
     image: quay.io/keycloak/keycloak:24.0
-    container_name: sso-keycloak
-    restart: unless-stopped
+    container_name: ecommerce-keycloak
     environment:
-      # 資料庫配置
       KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-keycloak}
-      KC_DB_USERNAME: ${POSTGRES_USER:-keycloak}
-      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-keycloak123}
-      # 管理員帳號
-      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak123
+      KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin123}
-      # 主機名稱配置
-      KC_HOSTNAME: ${KC_HOSTNAME:-localhost}
-      KC_HOSTNAME_PORT: ${KEYCLOAK_PORT:-8080}
-      KC_HOSTNAME_STRICT: "false"
-      KC_HOSTNAME_STRICT_HTTPS: "false"
-      # HTTP 配置（PoC 啟用 HTTP）
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: 8180
       KC_HTTP_ENABLED: "true"
-      KC_PROXY: edge
-      # 健康檢查
       KC_HEALTH_ENABLED: "true"
-      KC_METRICS_ENABLED: "true"
     command: start-dev
     ports:
-      - "${KEYCLOAK_PORT:-8080}:8080"
+      - "8180:8080"
     depends_on:
       postgres:
         condition: service_healthy
       openldap:
         condition: service_healthy
     networks:
-      - sso-network
+      - ecommerce-network
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080;echo -e 'GET /health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n' >&3;if [ $? -eq 0 ]; then echo 'Healthcheck Successful';exit 0;else echo 'Healthcheck Failed';exit 1;fi;"]
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
       interval: 30s
       timeout: 10s
-      retries: 5
+      retries: 10
       start_period: 120s
 
   # ============================================================
-  # Spring Boot API Application
+  # Gateway
   # ============================================================
-  spring-api:
+  gateway:
     build:
-      context: ./spring-api
-      dockerfile: Dockerfile
-    container_name: sso-spring-api
-    restart: unless-stopped
+      context: ../../
+      dockerfile: services/gateway/Dockerfile
+    container_name: ecommerce-gateway
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/demo
-      KEYCLOAK_JWKS_URI: http://keycloak:8080/realms/demo/protocol/openid-connect/certs
-      # JVM 配置
-      JAVA_OPTS: "-Xms256m -Xmx512m"
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/ecommerce
+      USER_SERVICE_URL: http://user-service:8081
+      PRODUCT_SERVICE_URL: http://product-service:8082
     ports:
-      - "${API_PORT:-9090}:9090"
+      - "8080:8080"
     depends_on:
       keycloak:
         condition: service_healthy
     networks:
-      - sso-network
+      - ecommerce-network
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/actuator/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/actuator/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 60s
 
-# ============================================================
-# Networks
-# ============================================================
-networks:
-  sso-network:
-    driver: bridge
-    name: sso-network
+  # ============================================================
+  # User Service
+  # ============================================================
+  user-service:
+    build:
+      context: ../../
+      dockerfile: services/user-service/Dockerfile
+    container_name: ecommerce-user-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/ecommerce
+      SPRING_DATASOURCE_URL: jdbc:h2:file:/data/userdb
+    volumes:
+      - user_service_data:/data
+    ports:
+      - "8081:8081"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
 
-# ============================================================
-# Volumes
-# ============================================================
+  # ============================================================
+  # Product Service
+  # ============================================================
+  product-service:
+    build:
+      context: ../../
+      dockerfile: services/product-service/Dockerfile
+    container_name: ecommerce-product-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/ecommerce
+      SPRING_DATASOURCE_URL: jdbc:h2:file:/data/productdb
+    volumes:
+      - product_service_data:/data
+    ports:
+      - "8082:8082"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
+networks:
+  ecommerce-network:
+    driver: bridge
+
 volumes:
   ldap_data:
-    name: sso-ldap-data
   ldap_config:
-    name: sso-ldap-config
   postgres_data:
-    name: sso-postgres-data
+  user_service_data:
+  product_service_data:
 ```
 
-### 3.2 環境變數檔案 (.env)
+### 3.2 docker-compose.infra.yml (僅基礎設施)
 
-```bash
-# .env - Environment Variables
+```yaml
+# deploy/docker/docker-compose.infra.yml
+# 本地開發用：僅啟動 OpenLDAP + Keycloak
+version: '3.8'
 
-# ============ OpenLDAP ============
-LDAP_ADMIN_PASSWORD=admin123
-LDAP_CONFIG_PASSWORD=config123
-LDAP_PORT=389
-LDAPS_PORT=636
+services:
+  openldap:
+    image: osixia/openldap:1.5.0
+    container_name: ecommerce-openldap
+    environment:
+      LDAP_ORGANISATION: "E-Commerce Corp"
+      LDAP_DOMAIN: "ecommerce.local"
+      LDAP_ADMIN_PASSWORD: admin123
+      LDAP_TLS: "false"
+    ports:
+      - "389:389"
+    volumes:
+      - ../../infra/ldap/bootstrap.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/bootstrap.ldif
+    networks:
+      - ecommerce-network
 
-# ============ phpLDAPadmin ============
-PHPLDAPADMIN_PORT=8081
+  phpldapadmin:
+    image: osixia/phpldapadmin:0.9.0
+    container_name: ecommerce-phpldapadmin
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: openldap
+      PHPLDAPADMIN_HTTPS: "false"
+    ports:
+      - "8181:80"
+    depends_on:
+      - openldap
+    networks:
+      - ecommerce-network
 
-# ============ PostgreSQL ============
-POSTGRES_DB=keycloak
-POSTGRES_USER=keycloak
-POSTGRES_PASSWORD=keycloak123
+  postgres:
+    image: postgres:15-alpine
+    container_name: ecommerce-postgres
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: keycloak123
+    ports:
+      - "5432:5432"
+    networks:
+      - ecommerce-network
 
-# ============ Keycloak ============
-KEYCLOAK_ADMIN=admin
-KEYCLOAK_ADMIN_PASSWORD=admin123
-KEYCLOAK_PORT=8080
-KC_HOSTNAME=localhost
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: ecommerce-keycloak
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak123
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin123
+      KC_HTTP_ENABLED: "true"
+    command: start-dev
+    ports:
+      - "8180:8080"
+    depends_on:
+      - postgres
+      - openldap
+    networks:
+      - ecommerce-network
 
-# ============ Spring API ============
-API_PORT=9090
+networks:
+  ecommerce-network:
+    driver: bridge
 ```
 
 ---
 
 ## 4. OpenLDAP 配置
 
-### 4.1 目錄結構設計
-
-```
-dc=example,dc=com                    (Domain)
-├── ou=users                         (Users OU)
-│   ├── uid=admin.user              (Admin User)
-│   ├── uid=normal.user             (Normal User)
-│   └── uid=auditor.user            (Auditor User)
-├── ou=groups                        (Groups OU)
-│   ├── cn=admins                   (Admin Group)
-│   ├── cn=users                    (User Group)
-│   └── cn=auditors                 (Auditor Group)
-└── ou=services                      (Service Accounts)
-    └── cn=keycloak                 (Keycloak Bind Account)
-```
-
-### 4.2 bootstrap.ldif
+### 4.1 bootstrap.ldif
 
 ```ldif
-# ldap/bootstrap.ldif
-# ============================================================
-# OpenLDAP Bootstrap Data
-# ============================================================
+# infra/ldap/bootstrap.ldif
 
-# ------------------------------------------------------------
 # Organizational Units
-# ------------------------------------------------------------
-dn: ou=users,dc=example,dc=com
+dn: ou=users,dc=ecommerce,dc=local
 objectClass: organizationalUnit
 ou: users
-description: Container for user accounts
 
-dn: ou=groups,dc=example,dc=com
+dn: ou=groups,dc=ecommerce,dc=local
 objectClass: organizationalUnit
 ou: groups
-description: Container for groups
 
-dn: ou=services,dc=example,dc=com
+dn: ou=services,dc=ecommerce,dc=local
 objectClass: organizationalUnit
 ou: services
-description: Container for service accounts
 
-# ------------------------------------------------------------
 # Service Account for Keycloak
-# ------------------------------------------------------------
-dn: cn=keycloak,ou=services,dc=example,dc=com
+dn: cn=keycloak,ou=services,dc=ecommerce,dc=local
 objectClass: organizationalRole
 objectClass: simpleSecurityObject
 cn: keycloak
-description: Keycloak LDAP bind account
 userPassword: keycloak123
 
-# ------------------------------------------------------------
-# User: admin.user (Administrator)
-# ------------------------------------------------------------
-dn: uid=admin.user,ou=users,dc=example,dc=com
+# Admin User
+dn: uid=admin.user,ou=users,dc=ecommerce,dc=local
 objectClass: inetOrgPerson
 objectClass: posixAccount
 objectClass: shadowAccount
@@ -367,21 +415,15 @@ uid: admin.user
 sn: User
 givenName: Admin
 cn: Admin User
-displayName: Admin User
 uidNumber: 10001
 gidNumber: 10001
 userPassword: admin123
-loginShell: /bin/bash
 homeDirectory: /home/admin.user
-mail: admin@example.com
+mail: admin@ecommerce.local
 telephoneNumber: +886-2-1234-5678
-title: System Administrator
-employeeType: full-time
 
-# ------------------------------------------------------------
-# User: normal.user (Regular User)
-# ------------------------------------------------------------
-dn: uid=normal.user,ou=users,dc=example,dc=com
+# Normal User
+dn: uid=normal.user,ou=users,dc=ecommerce,dc=local
 objectClass: inetOrgPerson
 objectClass: posixAccount
 objectClass: shadowAccount
@@ -389,43 +431,14 @@ uid: normal.user
 sn: User
 givenName: Normal
 cn: Normal User
-displayName: Normal User
 uidNumber: 10002
 gidNumber: 10002
 userPassword: user123
-loginShell: /bin/bash
 homeDirectory: /home/normal.user
-mail: user@example.com
-telephoneNumber: +886-2-2345-6789
-title: Staff
-employeeType: full-time
+mail: user@ecommerce.local
 
-# ------------------------------------------------------------
-# User: auditor.user (Auditor)
-# ------------------------------------------------------------
-dn: uid=auditor.user,ou=users,dc=example,dc=com
-objectClass: inetOrgPerson
-objectClass: posixAccount
-objectClass: shadowAccount
-uid: auditor.user
-sn: User
-givenName: Auditor
-cn: Auditor User
-displayName: Auditor User
-uidNumber: 10003
-gidNumber: 10003
-userPassword: auditor123
-loginShell: /bin/bash
-homeDirectory: /home/auditor.user
-mail: auditor@example.com
-telephoneNumber: +886-2-3456-7890
-title: Internal Auditor
-employeeType: full-time
-
-# ------------------------------------------------------------
-# User: test.user (Test Account)
-# ------------------------------------------------------------
-dn: uid=test.user,ou=users,dc=example,dc=com
+# Test User
+dn: uid=test.user,ou=users,dc=ecommerce,dc=local
 objectClass: inetOrgPerson
 objectClass: posixAccount
 objectClass: shadowAccount
@@ -433,75 +446,24 @@ uid: test.user
 sn: User
 givenName: Test
 cn: Test User
-displayName: Test User
-uidNumber: 10004
-gidNumber: 10004
+uidNumber: 10003
+gidNumber: 10003
 userPassword: test123
-loginShell: /bin/bash
 homeDirectory: /home/test.user
-mail: test@example.com
-employeeType: contractor
+mail: test@ecommerce.local
 
-# ------------------------------------------------------------
-# Group: admins
-# ------------------------------------------------------------
-dn: cn=admins,ou=groups,dc=example,dc=com
+# Groups
+dn: cn=admins,ou=groups,dc=ecommerce,dc=local
 objectClass: groupOfNames
 cn: admins
-description: System Administrators
-member: uid=admin.user,ou=users,dc=example,dc=com
+member: uid=admin.user,ou=users,dc=ecommerce,dc=local
 
-# ------------------------------------------------------------
-# Group: users
-# ------------------------------------------------------------
-dn: cn=users,ou=groups,dc=example,dc=com
+dn: cn=users,ou=groups,dc=ecommerce,dc=local
 objectClass: groupOfNames
 cn: users
-description: Regular Users
-member: uid=admin.user,ou=users,dc=example,dc=com
-member: uid=normal.user,ou=users,dc=example,dc=com
-member: uid=test.user,ou=users,dc=example,dc=com
-
-# ------------------------------------------------------------
-# Group: auditors
-# ------------------------------------------------------------
-dn: cn=auditors,ou=groups,dc=example,dc=com
-objectClass: groupOfNames
-cn: auditors
-description: Internal Auditors
-member: uid=auditor.user,ou=users,dc=example,dc=com
-```
-
-### 4.3 LDAP 測試指令
-
-```bash
-# 測試 LDAP 連線
-ldapsearch -x -H ldap://localhost:389 \
-  -D "cn=admin,dc=example,dc=com" \
-  -w admin123 \
-  -b "dc=example,dc=com" \
-  "(objectClass=*)"
-
-# 搜尋所有使用者
-ldapsearch -x -H ldap://localhost:389 \
-  -D "cn=admin,dc=example,dc=com" \
-  -w admin123 \
-  -b "ou=users,dc=example,dc=com" \
-  "(objectClass=inetOrgPerson)" \
-  uid cn mail
-
-# 搜尋所有群組
-ldapsearch -x -H ldap://localhost:389 \
-  -D "cn=admin,dc=example,dc=com" \
-  -w admin123 \
-  -b "ou=groups,dc=example,dc=com" \
-  "(objectClass=groupOfNames)" \
-  cn member
-
-# 驗證使用者密碼
-ldapwhoami -x -H ldap://localhost:389 \
-  -D "uid=admin.user,ou=users,dc=example,dc=com" \
-  -w admin123
+member: uid=admin.user,ou=users,dc=ecommerce,dc=local
+member: uid=normal.user,ou=users,dc=ecommerce,dc=local
+member: uid=test.user,ou=users,dc=ecommerce,dc=local
 ```
 
 ---
@@ -510,737 +472,767 @@ ldapwhoami -x -H ldap://localhost:389 \
 
 ### 5.1 Realm 配置步驟
 
-以下是手動配置 Keycloak Realm 的步驟（首次設置時執行）：
+1. **建立 Realm**: `ecommerce`
 
-#### Step 1: 建立 Realm
+2. **配置 LDAP User Federation**:
+   - Connection URL: `ldap://openldap:389`
+   - Users DN: `ou=users,dc=ecommerce,dc=local`
+   - Bind DN: `cn=admin,dc=ecommerce,dc=local`
+   - Bind Credential: `admin123`
 
-1. 登入 Keycloak Admin Console: `http://localhost:8080`
-2. 點擊左上角 "master" 下拉選單
-3. 點擊 "Create Realm"
-4. 輸入 Realm name: `demo`
-5. 點擊 "Create"
+3. **配置 LDAP Group Mapper**:
+   - LDAP Groups DN: `ou=groups,dc=ecommerce,dc=local`
+   - Membership LDAP Attribute: `member`
 
-#### Step 2: 配置 LDAP User Federation
+4. **建立 Realm Roles**:
+   - `ADMIN`
+   - `USER`
 
-1. 進入 `demo` Realm
-2. 左側選單點擊 "User federation"
-3. 點擊 "Add Ldap providers"
-4. 填入以下配置：
-
-```yaml
-# LDAP Provider Settings
-UI display name: OpenLDAP
-Vendor: Other
-Connection URL: ldap://openldap:389
-Users DN: ou=users,dc=example,dc=com
-Bind type: simple
-Bind DN: cn=admin,dc=example,dc=com
-Bind credential: admin123
-
-# Sync Settings
-Import users: ON
-Sync registrations: OFF
-Periodic full sync: ON
-Full sync period: 604800  # 7 days
-Periodic changed users sync: ON
-Changed users sync period: 86400  # 1 day
-
-# Kerberos Integration
-Allow Kerberos authentication: OFF
-
-# LDAP Searching and Updating
-Edit mode: READ_ONLY
-Username LDAP attribute: uid
-RDN LDAP attribute: uid
-UUID LDAP attribute: entryUUID
-User object classes: inetOrgPerson, posixAccount
-```
-
-5. 點擊 "Test connection" 確認連線成功
-6. 點擊 "Test authentication" 確認認證成功
-7. 點擊 "Save"
-8. 點擊 "Sync all users" 同步 LDAP 使用者
-
-#### Step 3: 配置 LDAP Group Mapper
-
-1. 在 LDAP Provider 頁面，點擊 "Mappers" 頁籤
-2. 點擊 "Add mapper"
-3. 填入以下配置：
-
-```yaml
-Name: ldap-group-mapper
-Mapper type: group-ldap-mapper
-LDAP Groups DN: ou=groups,dc=example,dc=com
-Group Name LDAP Attribute: cn
-Group Object Classes: groupOfNames
-Membership LDAP Attribute: member
-Membership Attribute Type: DN
-Membership User LDAP Attribute: uid
-Mode: READ_ONLY
-User Groups Retrieve Strategy: LOAD_GROUPS_BY_MEMBER_ATTRIBUTE
-Drop non-existing groups during sync: ON
-```
-
-4. 點擊 "Save"
-5. 點擊 "Sync LDAP groups to Keycloak"
-
-#### Step 4: 建立 Realm Roles
-
-1. 左側選單點擊 "Realm roles"
-2. 建立以下角色：
-
-| Role Name | Description |
-|-----------|-------------|
-| ADMIN | System Administrator |
-| USER | Regular User |
-| AUDITOR | Internal Auditor |
-
-#### Step 5: 配置 Group-Role Mapping
-
-1. 左側選單點擊 "Groups"
-2. 選擇 `admins` 群組
-3. 點擊 "Role mapping" 頁籤
-4. 點擊 "Assign role"
-5. 勾選 "ADMIN" 和 "USER"
-6. 對其他群組重複此步驟：
+5. **Group-Role Mapping**:
+   - `admins` → ADMIN, USER
    - `users` → USER
-   - `auditors` → AUDITOR, USER
 
-#### Step 6: 建立 Client
+6. **建立 Client**: `ecommerce-api`
+   - Client authentication: ON
+   - Valid redirect URIs: `http://localhost:*`
 
-1. 左側選單點擊 "Clients"
-2. 點擊 "Create client"
-3. 填入以下配置：
+---
 
-```yaml
-# General Settings
-Client type: OpenID Connect
-Client ID: spring-api
-Name: Spring Boot API
-Description: Spring Boot API Client
+## 6. Kubernetes 配置
 
-# Capability config
-Client authentication: ON
-Authorization: OFF
-Authentication flow:
-  - Standard flow: ON
-  - Direct access grants: ON  # 用於 Resource Owner Password Credentials
-  - Service accounts roles: OFF
+### 6.1 Base 配置
 
-# Login settings
-Root URL: http://localhost:9090
-Home URL: http://localhost:9090
-Valid redirect URIs: 
-  - http://localhost:9090/*
-  - http://localhost:3000/*  # 前端（如需）
-Valid post logout redirect URIs: +
-Web origins: +
-```
-
-4. 點擊 "Save"
-5. 複製 Client Secret（Credentials 頁籤）
-
-#### Step 7: Token 配置
-
-1. 進入 `spring-api` Client
-2. 點擊 "Advanced" 頁籤
-3. 配置 Token 有效期：
+#### namespace.yaml
 
 ```yaml
-Access token lifespan: 15 minutes
-Client Session Idle: 30 minutes
-Client Session Max: 8 hours
+# deploy/k8s/base/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ecommerce
+  labels:
+    app.kubernetes.io/name: ecommerce
 ```
 
-### 5.2 Realm Export (realm-export.json)
+#### configmap.yaml
 
-```json
-{
-  "id": "demo",
-  "realm": "demo",
-  "displayName": "Demo Realm",
-  "enabled": true,
-  "sslRequired": "external",
-  "registrationAllowed": false,
-  "loginWithEmailAllowed": true,
-  "duplicateEmailsAllowed": false,
-  "resetPasswordAllowed": true,
-  "editUsernameAllowed": false,
-  "bruteForceProtected": true,
-  "permanentLockout": false,
-  "maxFailureWaitSeconds": 900,
-  "minimumQuickLoginWaitSeconds": 60,
-  "waitIncrementSeconds": 60,
-  "quickLoginCheckMilliSeconds": 1000,
-  "maxDeltaTimeSeconds": 43200,
-  "failureFactor": 5,
-  "roles": {
-    "realm": [
-      {
-        "name": "ADMIN",
-        "description": "System Administrator",
-        "composite": false
-      },
-      {
-        "name": "USER",
-        "description": "Regular User",
-        "composite": false
-      },
-      {
-        "name": "AUDITOR",
-        "description": "Internal Auditor",
-        "composite": false
-      }
-    ]
-  },
-  "clients": [
-    {
-      "clientId": "spring-api",
-      "name": "Spring Boot API",
-      "enabled": true,
-      "clientAuthenticatorType": "client-secret",
-      "secret": "your-client-secret-here",
-      "redirectUris": [
-        "http://localhost:9090/*",
-        "http://localhost:3000/*"
-      ],
-      "webOrigins": ["+"],
-      "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": true,
-      "serviceAccountsEnabled": false,
-      "publicClient": false,
-      "protocol": "openid-connect",
-      "attributes": {
-        "access.token.lifespan": "900",
-        "client.session.idle.timeout": "1800",
-        "client.session.max.lifespan": "28800"
-      }
-    }
-  ],
-  "components": {
-    "org.keycloak.storage.UserStorageProvider": [
-      {
-        "name": "OpenLDAP",
-        "providerId": "ldap",
-        "config": {
-          "vendor": ["other"],
-          "connectionUrl": ["ldap://openldap:389"],
-          "usersDn": ["ou=users,dc=example,dc=com"],
-          "bindDn": ["cn=admin,dc=example,dc=com"],
-          "bindCredential": ["admin123"],
-          "authType": ["simple"],
-          "editMode": ["READ_ONLY"],
-          "usernameLDAPAttribute": ["uid"],
-          "rdnLDAPAttribute": ["uid"],
-          "uuidLDAPAttribute": ["entryUUID"],
-          "userObjectClasses": ["inetOrgPerson, posixAccount"],
-          "importEnabled": ["true"],
-          "syncRegistrations": ["false"],
-          "fullSyncPeriod": ["604800"],
-          "changedSyncPeriod": ["86400"]
-        }
-      }
-    ]
-  }
-}
+```yaml
+# deploy/k8s/base/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ecommerce-config
+  namespace: ecommerce
+data:
+  SPRING_PROFILES_ACTIVE: "kubernetes"
+  KEYCLOAK_ISSUER_URI: "http://keycloak:8080/realms/ecommerce"
+  USER_SERVICE_URL: "http://user-service:8081"
+  PRODUCT_SERVICE_URL: "http://product-service:8082"
+```
+
+#### Gateway Deployment
+
+```yaml
+# deploy/k8s/base/gateway/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: ecommerce
+  labels:
+    app: gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: ecommerce/gateway:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: ecommerce-config
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: ecommerce
+spec:
+  type: LoadBalancer
+  selector:
+    app: gateway
+  ports:
+    - port: 80
+      targetPort: 8080
+```
+
+#### kustomization.yaml
+
+```yaml
+# deploy/k8s/base/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ecommerce
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secrets.yaml
+  - gateway/deployment.yaml
+  - user-service/deployment.yaml
+  - product-service/deployment.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: ecommerce
 ```
 
 ---
 
-## 6. 部署腳本
+## 7. 藍綠部署 (Blue-Green Deployment)
 
-### 6.1 setup.sh - 環境初始化
+### 7.1 藍綠部署架構
+
+```mermaid
+flowchart TB
+    subgraph Service["K8s Service"]
+        SVC[gateway<br/>selector: version = blue/green]
+    end
+
+    subgraph Blue["Blue Environment (v1.0.0) - ACTIVE"]
+        GB[gateway-blue]
+        UB[user-service-blue]
+        PB[product-service-blue]
+    end
+
+    subgraph Green["Green Environment (v1.1.0) - STANDBY"]
+        GG[gateway-green]
+        UG[user-service-green]
+        PG[product-service-green]
+    end
+
+    SVC -->|current| Blue
+    SVC -.->|switch| Green
+
+    style Blue fill:#d4edda,stroke:#28a745
+    style Green fill:#fff3cd,stroke:#ffc107
+```
+
+**切換流程：**
+
+```mermaid
+flowchart LR
+    A[1. 部署新版本到 Green] --> B[2. 驗證 Green 環境]
+    B --> C[3. 切換 Service selector]
+    C --> D[4. Blue 變為 Standby]
+    D --> E[可回滾]
+```
+
+### 7.2 Blue Deployment
+
+```yaml
+# deploy/k8s/blue-green/deployment-blue.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-blue
+  namespace: ecommerce
+  labels:
+    app: gateway
+    version: blue
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: gateway
+      version: blue
+  template:
+    metadata:
+      labels:
+        app: gateway
+        version: blue
+    spec:
+      containers:
+        - name: gateway
+          image: ecommerce/gateway:v1.0.0
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: ecommerce-config
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service-blue
+  namespace: ecommerce
+  labels:
+    app: user-service
+    version: blue
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: user-service
+      version: blue
+  template:
+    metadata:
+      labels:
+        app: user-service
+        version: blue
+    spec:
+      containers:
+        - name: user-service
+          image: ecommerce/user-service:v1.0.0
+          ports:
+            - containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: ecommerce-config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service-blue
+  namespace: ecommerce
+  labels:
+    app: product-service
+    version: blue
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: product-service
+      version: blue
+  template:
+    metadata:
+      labels:
+        app: product-service
+        version: blue
+    spec:
+      containers:
+        - name: product-service
+          image: ecommerce/product-service:v1.0.0
+          ports:
+            - containerPort: 8082
+          envFrom:
+            - configMapRef:
+                name: ecommerce-config
+```
+
+### 7.3 Green Deployment
+
+```yaml
+# deploy/k8s/blue-green/deployment-green.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-green
+  namespace: ecommerce
+  labels:
+    app: gateway
+    version: green
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: gateway
+      version: green
+  template:
+    metadata:
+      labels:
+        app: gateway
+        version: green
+    spec:
+      containers:
+        - name: gateway
+          image: ecommerce/gateway:v1.1.0
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: ecommerce-config
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service-green
+  namespace: ecommerce
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: user-service
+      version: green
+  template:
+    metadata:
+      labels:
+        app: user-service
+        version: green
+    spec:
+      containers:
+        - name: user-service
+          image: ecommerce/user-service:v1.1.0
+          ports:
+            - containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: ecommerce-config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service-green
+  namespace: ecommerce
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: product-service
+      version: green
+  template:
+    metadata:
+      labels:
+        app: product-service
+        version: green
+    spec:
+      containers:
+        - name: product-service
+          image: ecommerce/product-service:v1.1.0
+          ports:
+            - containerPort: 8082
+          envFrom:
+            - configMapRef:
+                name: ecommerce-config
+```
+
+### 7.4 Service (流量切換)
+
+```yaml
+# deploy/k8s/blue-green/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: ecommerce
+spec:
+  type: LoadBalancer
+  selector:
+    app: gateway
+    version: blue  # 切換：blue ↔ green
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  selector:
+    app: user-service
+    version: blue  # 切換：blue ↔ green
+  ports:
+    - port: 8081
+      targetPort: 8081
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-service
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  selector:
+    app: product-service
+    version: blue  # 切換：blue ↔ green
+  ports:
+    - port: 8082
+      targetPort: 8082
+```
+
+---
+
+## 8. 部署腳本
+
+### 8.1 blue-green-deploy.sh
 
 ```bash
 #!/bin/bash
-# scripts/setup.sh - Initialize SSO RBAC PoC Environment
+# deploy/scripts/blue-green-deploy.sh
+# 部署新版本到待命環境
 
 set -e
 
-# Colors for output
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'
+NC='\033[0m'
 
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  SSO RBAC PoC - Environment Setup     ${NC}"
-echo -e "${GREEN}========================================${NC}"
+NAMESPACE="ecommerce"
+VERSION=${1:-"v1.1.0"}
+TARGET_COLOR=${2:-"green"}
 
-# Check prerequisites
-echo -e "\n${YELLOW}[1/6] Checking prerequisites...${NC}"
+echo -e "${GREEN}======================================${NC}"
+echo -e "${GREEN}  Blue-Green Deployment              ${NC}"
+echo -e "${GREEN}======================================${NC}"
+echo -e "  Version: ${VERSION}"
+echo -e "  Target:  ${TARGET_COLOR}"
+echo ""
 
-if ! command -v docker &> /dev/null; then
-    echo -e "${RED}Error: Docker is not installed${NC}"
+# 確認當前版本
+CURRENT=$(kubectl get svc gateway -n $NAMESPACE -o jsonpath='{.spec.selector.version}' 2>/dev/null || echo "none")
+echo -e "${YELLOW}Current active: ${CURRENT}${NC}"
+
+if [ "$CURRENT" == "$TARGET_COLOR" ]; then
+    echo -e "${RED}Error: Cannot deploy to active environment!${NC}"
     exit 1
 fi
 
-if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
-    echo -e "${RED}Error: Docker Compose is not installed${NC}"
-    exit 1
-fi
-
-echo -e "${GREEN}✓ Prerequisites check passed${NC}"
-
-# Create directories
-echo -e "\n${YELLOW}[2/6] Creating directories...${NC}"
-mkdir -p ldap keycloak spring-api scripts
-echo -e "${GREEN}✓ Directories created${NC}"
-
-# Create .env if not exists
-echo -e "\n${YELLOW}[3/6] Creating environment file...${NC}"
-if [ ! -f .env ]; then
-    cat > .env << 'EOF'
-# OpenLDAP
-LDAP_ADMIN_PASSWORD=admin123
-LDAP_CONFIG_PASSWORD=config123
-LDAP_PORT=389
-LDAPS_PORT=636
-
-# phpLDAPadmin
-PHPLDAPADMIN_PORT=8081
-
-# PostgreSQL
-POSTGRES_DB=keycloak
-POSTGRES_USER=keycloak
-POSTGRES_PASSWORD=keycloak123
-
-# Keycloak
-KEYCLOAK_ADMIN=admin
-KEYCLOAK_ADMIN_PASSWORD=admin123
-KEYCLOAK_PORT=8080
-KC_HOSTNAME=localhost
-
-# Spring API
-API_PORT=9090
-EOF
-    echo -e "${GREEN}✓ .env file created${NC}"
-else
-    echo -e "${GREEN}✓ .env file already exists${NC}"
-fi
-
-# Pull Docker images
-echo -e "\n${YELLOW}[4/6] Pulling Docker images...${NC}"
-docker pull osixia/openldap:1.5.0
-docker pull osixia/phpldapadmin:0.9.0
-docker pull postgres:15-alpine
-docker pull quay.io/keycloak/keycloak:24.0
-echo -e "${GREEN}✓ Docker images pulled${NC}"
-
-# Start services
-echo -e "\n${YELLOW}[5/6] Starting services...${NC}"
-docker compose up -d
-echo -e "${GREEN}✓ Services starting...${NC}"
-
-# Wait for services to be healthy
-echo -e "\n${YELLOW}[6/6] Waiting for services to be ready...${NC}"
-echo "This may take 2-3 minutes..."
-
-# Wait for Keycloak
-KEYCLOAK_READY=false
-for i in {1..60}; do
-    if curl -s http://localhost:8080/health/ready | grep -q "UP"; then
-        KEYCLOAK_READY=true
-        break
-    fi
-    echo -n "."
-    sleep 5
+# 更新 Image
+echo -e "\n${YELLOW}[1/3] Updating images...${NC}"
+for svc in gateway user-service product-service; do
+    kubectl set image deployment/${svc}-${TARGET_COLOR} \
+        ${svc}=ecommerce/${svc}:${VERSION} \
+        -n $NAMESPACE
+    echo "  Updated: ${svc}-${TARGET_COLOR}"
 done
 
-if [ "$KEYCLOAK_READY" = true ]; then
-    echo -e "\n${GREEN}✓ All services are ready!${NC}"
-else
-    echo -e "\n${YELLOW}⚠ Keycloak is still starting, please wait...${NC}"
-fi
+# 等待 Rollout
+echo -e "\n${YELLOW}[2/3] Waiting for rollout...${NC}"
+for svc in gateway user-service product-service; do
+    kubectl rollout status deployment/${svc}-${TARGET_COLOR} \
+        -n $NAMESPACE --timeout=300s
+done
 
-# Print access information
-echo -e "\n${GREEN}========================================${NC}"
-echo -e "${GREEN}  Setup Complete!                       ${NC}"
-echo -e "${GREEN}========================================${NC}"
-echo ""
-echo -e "Access URLs:"
-echo -e "  ${YELLOW}Keycloak:${NC}       http://localhost:8080"
-echo -e "                  Username: admin"
-echo -e "                  Password: admin123"
-echo ""
-echo -e "  ${YELLOW}phpLDAPadmin:${NC}   http://localhost:8081"
-echo -e "                  Login DN: cn=admin,dc=example,dc=com"
-echo -e "                  Password: admin123"
-echo ""
-echo -e "  ${YELLOW}Spring API:${NC}     http://localhost:9090"
-echo -e "                  Swagger:  http://localhost:9090/swagger-ui.html"
-echo ""
-echo -e "${YELLOW}LDAP Test Users:${NC}"
-echo -e "  admin.user / admin123    (ADMIN role)"
-echo -e "  normal.user / user123    (USER role)"
-echo -e "  auditor.user / auditor123 (AUDITOR role)"
-echo ""
-echo -e "${YELLOW}Next Steps:${NC}"
-echo -e "  1. Configure Keycloak Realm (see INFRA.md Section 5)"
-echo -e "  2. Test API endpoints with Postman or curl"
-echo ""
+# 驗證健康狀態
+echo -e "\n${YELLOW}[3/3] Verifying health...${NC}"
+sleep 10
+
+ALL_READY=true
+for svc in gateway user-service product-service; do
+    READY=$(kubectl get deployment ${svc}-${TARGET_COLOR} -n $NAMESPACE \
+        -o jsonpath='{.status.readyReplicas}')
+    DESIRED=$(kubectl get deployment ${svc}-${TARGET_COLOR} -n $NAMESPACE \
+        -o jsonpath='{.spec.replicas}')
+    
+    if [ "$READY" == "$DESIRED" ]; then
+        echo -e "  ${svc}: ${GREEN}✓${NC} (${READY}/${DESIRED})"
+    else
+        echo -e "  ${svc}: ${RED}✗${NC} (${READY}/${DESIRED})"
+        ALL_READY=false
+    fi
+done
+
+if [ "$ALL_READY" == "true" ]; then
+    echo -e "\n${GREEN}Deployment successful!${NC}"
+    echo -e "Run: ${YELLOW}./blue-green-switch.sh ${TARGET_COLOR}${NC} to switch traffic"
+else
+    echo -e "\n${RED}Deployment failed!${NC}"
+    exit 1
+fi
 ```
 
-### 6.2 cleanup.sh - 環境清理
+### 8.2 blue-green-switch.sh
 
 ```bash
 #!/bin/bash
-# scripts/cleanup.sh - Cleanup SSO RBAC PoC Environment
+# deploy/scripts/blue-green-switch.sh
+# 切換流量到指定環境
 
 set -e
 
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${YELLOW}========================================${NC}"
-echo -e "${YELLOW}  SSO RBAC PoC - Environment Cleanup   ${NC}"
-echo -e "${YELLOW}========================================${NC}"
+NAMESPACE="ecommerce"
+TARGET=${1:-"green"}
 
-# Confirm cleanup
-read -p "This will remove all containers and volumes. Continue? (y/N) " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo -e "${RED}Cleanup cancelled${NC}"
+if [ "$TARGET" != "blue" ] && [ "$TARGET" != "green" ]; then
+    echo -e "${RED}Usage: $0 [blue|green]${NC}"
     exit 1
 fi
 
-# Stop and remove containers
-echo -e "\n${YELLOW}[1/3] Stopping containers...${NC}"
-docker compose down
-echo -e "${GREEN}✓ Containers stopped${NC}"
+echo -e "${GREEN}======================================${NC}"
+echo -e "${GREEN}  Traffic Switch                     ${NC}"
+echo -e "${GREEN}======================================${NC}"
 
-# Remove volumes
-echo -e "\n${YELLOW}[2/3] Removing volumes...${NC}"
-docker volume rm sso-ldap-data sso-ldap-config sso-postgres-data 2>/dev/null || true
-echo -e "${GREEN}✓ Volumes removed${NC}"
+CURRENT=$(kubectl get svc gateway -n $NAMESPACE -o jsonpath='{.spec.selector.version}')
+echo -e "Current: ${CURRENT} → Target: ${TARGET}"
 
-# Remove network
-echo -e "\n${YELLOW}[3/3] Removing network...${NC}"
-docker network rm sso-network 2>/dev/null || true
-echo -e "${GREEN}✓ Network removed${NC}"
+if [ "$CURRENT" == "$TARGET" ]; then
+    echo -e "${YELLOW}Already on ${TARGET}${NC}"
+    exit 0
+fi
 
-echo -e "\n${GREEN}========================================${NC}"
-echo -e "${GREEN}  Cleanup Complete!                     ${NC}"
-echo -e "${GREEN}========================================${NC}"
+# 切換所有服務
+echo -e "\n${YELLOW}Switching services...${NC}"
+for svc in gateway user-service product-service; do
+    kubectl patch svc $svc -n $NAMESPACE \
+        -p "{\"spec\":{\"selector\":{\"version\":\"${TARGET}\"}}}"
+    echo "  Switched: $svc → $TARGET"
+done
+
+# 驗證
+echo -e "\n${YELLOW}Verifying...${NC}"
+sleep 5
+for svc in gateway user-service product-service; do
+    ACTUAL=$(kubectl get svc $svc -n $NAMESPACE -o jsonpath='{.spec.selector.version}')
+    if [ "$ACTUAL" == "$TARGET" ]; then
+        echo -e "  ${svc}: ${GREEN}✓${NC}"
+    else
+        echo -e "  ${svc}: ${RED}✗${NC}"
+    fi
+done
+
+echo -e "\n${GREEN}Traffic switched to ${TARGET}!${NC}"
 ```
 
-### 6.3 test-api.sh - API 測試腳本
+### 8.3 blue-green-verify.sh
 
 ```bash
 #!/bin/bash
-# scripts/test-api.sh - Test API Endpoints
+# deploy/scripts/blue-green-verify.sh
+# 驗證藍綠部署狀態
 
 set -e
 
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
+RED='\033[0;31m'
 NC='\033[0m'
 
-# Configuration
-KEYCLOAK_URL="http://localhost:8080"
-API_URL="http://localhost:9090"
-REALM="demo"
-CLIENT_ID="spring-api"
-CLIENT_SECRET="your-client-secret-here"  # 從 Keycloak 取得
+NAMESPACE="ecommerce"
+GATEWAY_URL=${1:-"http://localhost"}
+KEYCLOAK_URL=${2:-"http://localhost:8180"}
 
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  SSO RBAC PoC - API Testing           ${NC}"
-echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}======================================${NC}"
+echo -e "${GREEN}  Blue-Green Verification            ${NC}"
+echo -e "${GREEN}======================================${NC}"
 
-# Function to get access token
-get_token() {
-    local username=$1
-    local password=$2
-    
-    curl -s -X POST "${KEYCLOAK_URL}/realms/${REALM}/protocol/openid-connect/token" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "client_id=${CLIENT_ID}" \
-        -d "client_secret=${CLIENT_SECRET}" \
-        -d "grant_type=password" \
-        -d "username=${username}" \
-        -d "password=${password}" \
-        | jq -r '.access_token'
-}
+# 1. 檢查部署狀態
+echo -e "\n${YELLOW}[1/4] Deployment Status${NC}"
+for color in blue green; do
+    echo "  === $color ==="
+    for svc in gateway user-service product-service; do
+        READY=$(kubectl get deployment ${svc}-${color} -n $NAMESPACE \
+            -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+        DESIRED=$(kubectl get deployment ${svc}-${color} -n $NAMESPACE \
+            -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+        
+        if [ "$READY" == "$DESIRED" ] && [ "$READY" != "0" ]; then
+            echo -e "    ${svc}: ${GREEN}✓${NC} ${READY}/${DESIRED}"
+        else
+            echo -e "    ${svc}: ${YELLOW}○${NC} ${READY}/${DESIRED}"
+        fi
+    done
+done
 
-# Function to call API
-call_api() {
-    local method=$1
-    local endpoint=$2
-    local token=$3
-    
-    if [ -z "$token" ]; then
-        curl -s -X ${method} "${API_URL}${endpoint}" \
-            -H "Content-Type: application/json"
+# 2. 檢查服務指向
+echo -e "\n${YELLOW}[2/4] Service Selectors${NC}"
+for svc in gateway user-service product-service; do
+    VERSION=$(kubectl get svc $svc -n $NAMESPACE -o jsonpath='{.spec.selector.version}')
+    echo "  $svc → $VERSION"
+done
+
+# 3. 取得 Token
+echo -e "\n${YELLOW}[3/4] Authentication Test${NC}"
+TOKEN=$(curl -s -X POST "${KEYCLOAK_URL}/realms/ecommerce/protocol/openid-connect/token" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "client_id=ecommerce-api" \
+    -d "client_secret=YOUR_SECRET" \
+    -d "grant_type=password" \
+    -d "username=admin.user" \
+    -d "password=admin123" 2>/dev/null | jq -r '.access_token')
+
+if [ "$TOKEN" != "null" ] && [ -n "$TOKEN" ]; then
+    echo -e "  Token: ${GREEN}✓${NC}"
+else
+    echo -e "  Token: ${RED}✗${NC}"
+    TOKEN=""
+fi
+
+# 4. API 測試
+echo -e "\n${YELLOW}[4/4] API Tests${NC}"
+
+# Health
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" "${GATEWAY_URL}/actuator/health")
+if [ "$HTTP" == "200" ]; then
+    echo -e "  GET /actuator/health: ${GREEN}✓${NC} ($HTTP)"
+else
+    echo -e "  GET /actuator/health: ${RED}✗${NC} ($HTTP)"
+fi
+
+# Products (需要 Token)
+if [ -n "$TOKEN" ]; then
+    HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+        -H "Authorization: Bearer $TOKEN" \
+        "${GATEWAY_URL}/api/products")
+    if [ "$HTTP" == "200" ]; then
+        echo -e "  GET /api/products: ${GREEN}✓${NC} ($HTTP)"
     else
-        curl -s -X ${method} "${API_URL}${endpoint}" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${token}"
+        echo -e "  GET /api/products: ${RED}✗${NC} ($HTTP)"
     fi
-}
-
-# Test 1: Public Endpoints
-echo -e "\n${BLUE}[Test 1] Public Endpoints (No Auth Required)${NC}"
-echo -e "${YELLOW}GET /api/public/health${NC}"
-call_api "GET" "/api/public/health" | jq .
-echo -e "${YELLOW}GET /api/public/info${NC}"
-call_api "GET" "/api/public/info" | jq .
-
-# Test 2: Protected Endpoint without Token
-echo -e "\n${BLUE}[Test 2] Protected Endpoint without Token${NC}"
-echo -e "${YELLOW}GET /api/user/resources (expected: 401)${NC}"
-call_api "GET" "/api/user/resources" | jq .
-
-# Test 3: User Role Access
-echo -e "\n${BLUE}[Test 3] User Role Access${NC}"
-echo -e "${YELLOW}Getting token for normal.user...${NC}"
-USER_TOKEN=$(get_token "normal.user" "user123")
-
-if [ "$USER_TOKEN" != "null" ] && [ -n "$USER_TOKEN" ]; then
-    echo -e "${GREEN}✓ Token obtained${NC}"
-    
-    echo -e "\n${YELLOW}GET /api/user/profile (expected: 200)${NC}"
-    call_api "GET" "/api/user/profile" "$USER_TOKEN" | jq .
-    
-    echo -e "\n${YELLOW}GET /api/user/resources (expected: 200)${NC}"
-    call_api "GET" "/api/user/resources" "$USER_TOKEN" | jq .
-    
-    echo -e "\n${YELLOW}GET /api/admin/users (expected: 403 - User cannot access admin)${NC}"
-    call_api "GET" "/api/admin/users" "$USER_TOKEN" | jq .
-else
-    echo -e "${RED}✗ Failed to get token for normal.user${NC}"
 fi
 
-# Test 4: Admin Role Access
-echo -e "\n${BLUE}[Test 4] Admin Role Access${NC}"
-echo -e "${YELLOW}Getting token for admin.user...${NC}"
-ADMIN_TOKEN=$(get_token "admin.user" "admin123")
-
-if [ "$ADMIN_TOKEN" != "null" ] && [ -n "$ADMIN_TOKEN" ]; then
-    echo -e "${GREEN}✓ Token obtained${NC}"
-    
-    echo -e "\n${YELLOW}GET /api/admin/users (expected: 200)${NC}"
-    call_api "GET" "/api/admin/users" "$ADMIN_TOKEN" | jq .
-    
-    echo -e "\n${YELLOW}GET /api/admin/roles (expected: 200)${NC}"
-    call_api "GET" "/api/admin/roles" "$ADMIN_TOKEN" | jq .
-    
-    echo -e "\n${YELLOW}GET /api/admin/settings (expected: 200)${NC}"
-    call_api "GET" "/api/admin/settings" "$ADMIN_TOKEN" | jq .
-else
-    echo -e "${RED}✗ Failed to get token for admin.user${NC}"
-fi
-
-# Summary
-echo -e "\n${GREEN}========================================${NC}"
-echo -e "${GREEN}  Testing Complete!                     ${NC}"
-echo -e "${GREEN}========================================${NC}"
+# 總結
+echo -e "\n${GREEN}======================================${NC}"
+ACTIVE=$(kubectl get svc gateway -n $NAMESPACE -o jsonpath='{.spec.selector.version}')
+echo -e "  Active Version: ${GREEN}${ACTIVE}${NC}"
+echo -e "${GREEN}======================================${NC}"
 ```
 
 ---
 
-## 7. 服務端點與存取資訊
+## 9. 存取資訊
 
-### 7.1 存取資訊一覽
+### 9.1 服務端點
 
-| Service | URL | Credentials |
-|---------|-----|-------------|
-| Keycloak Admin | http://localhost:8080 | admin / admin123 |
-| phpLDAPadmin | http://localhost:8081 | cn=admin,dc=example,dc=com / admin123 |
-| Spring API | http://localhost:9090 | (需 JWT Token) |
-| Swagger UI | http://localhost:9090/swagger-ui.html | - |
-| OpenLDAP | ldap://localhost:389 | cn=admin,dc=example,dc=com / admin123 |
+| Service | Local | Docker | K8s |
+|---------|-------|--------|-----|
+| Gateway | :8080 | :8080 | :80 |
+| User Service | :8081 | :8081 | :8081 |
+| Product Service | :8082 | :8082 | :8082 |
+| Keycloak | :8180 | :8180 | :8180 |
+| phpLDAPadmin | :8181 | :8181 | - |
 
-### 7.2 測試帳號
+### 9.2 測試帳號
 
-| Username | Password | LDAP Groups | Keycloak Roles |
-|----------|----------|-------------|----------------|
-| admin.user | admin123 | admins, users | ADMIN, USER |
-| normal.user | user123 | users | USER |
-| auditor.user | auditor123 | auditors | AUDITOR, USER |
-| test.user | test123 | users | USER |
+| Username | Password | Role |
+|----------|----------|------|
+| admin.user | admin123 | ADMIN |
+| normal.user | user123 | USER |
+| test.user | test123 | USER |
 
-### 7.3 Keycloak OAuth Endpoints
-
-```
-# Token Endpoint (取得 Access Token)
-POST http://localhost:8080/realms/demo/protocol/openid-connect/token
-
-# Authorization Endpoint (授權碼流程)
-GET http://localhost:8080/realms/demo/protocol/openid-connect/auth
-
-# UserInfo Endpoint
-GET http://localhost:8080/realms/demo/protocol/openid-connect/userinfo
-
-# JWKS Endpoint (公鑰)
-GET http://localhost:8080/realms/demo/protocol/openid-connect/certs
-
-# Logout Endpoint
-POST http://localhost:8080/realms/demo/protocol/openid-connect/logout
-
-# OpenID Configuration
-GET http://localhost:8080/realms/demo/.well-known/openid-configuration
-```
-
----
-
-## 8. 取得 Token 範例
-
-### 8.1 使用 curl 取得 Token
+### 9.3 快速開始
 
 ```bash
-# Resource Owner Password Credentials Grant
-curl -X POST "http://localhost:8080/realms/demo/protocol/openid-connect/token" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "client_id=spring-api" \
-  -d "client_secret=YOUR_CLIENT_SECRET" \
-  -d "grant_type=password" \
-  -d "username=admin.user" \
-  -d "password=admin123"
+# 1. 本地開發（僅基礎設施）
+cd deploy/docker
+docker-compose -f docker-compose.infra.yml up -d
 
-# 回應範例
-{
-  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "expires_in": 900,
-  "refresh_expires_in": 1800,
-  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "Bearer",
-  "not-before-policy": 0,
-  "session_state": "abc123...",
-  "scope": "openid profile email"
-}
-```
+# 2. IDE 啟動服務
+./gradlew :services:gateway:bootRun
+./gradlew :services:user-service:bootRun
+./gradlew :services:product-service:bootRun
 
-### 8.2 使用 Token 呼叫 API
+# 3. Docker 完整環境
+./deploy/scripts/build-all.sh
+docker-compose up -d
 
-```bash
-# 設定 Token 變數
-TOKEN="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+# 4. K8s 部署
+kubectl apply -k deploy/k8s/base/
 
-# 呼叫受保護 API
-curl -X GET "http://localhost:9090/api/user/profile" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: application/json"
-
-# 呼叫管理員 API
-curl -X GET "http://localhost:9090/api/admin/users" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: application/json"
-```
-
----
-
-## 9. 故障排除
-
-### 9.1 常見問題
-
-#### OpenLDAP 無法啟動
-
-```bash
-# 檢查日誌
-docker logs sso-openldap
-
-# 常見原因：
-# 1. bootstrap.ldif 語法錯誤
-# 2. 權限問題
-# 解決方案：刪除 volumes 重新啟動
-docker compose down -v
-docker compose up -d
-```
-
-#### Keycloak 無法連接 LDAP
-
-```bash
-# 確認 OpenLDAP 可存取
-docker exec sso-keycloak \
-  ldapsearch -x -H ldap://openldap:389 \
-  -D "cn=admin,dc=example,dc=com" \
-  -w admin123 \
-  -b "dc=example,dc=com"
-
-# 常見原因：
-# 1. 網路問題 - 確認都在 sso-network
-# 2. 認證資訊錯誤
-# 3. OpenLDAP 尚未準備好
-```
-
-#### Spring API 啟動失敗
-
-```bash
-# 檢查日誌
-docker logs sso-spring-api
-
-# 常見原因：
-# 1. Keycloak 尚未準備好
-# 2. JWKS URI 配置錯誤
-# 解決方案：等待 Keycloak 完全啟動後重啟
-docker compose restart spring-api
-```
-
-#### Token 驗證失敗
-
-```bash
-# 確認 Token 有效性
-# 將 Token 貼到 https://jwt.io 解析
-
-# 常見原因：
-# 1. Token 過期
-# 2. Issuer 不匹配（localhost vs container name）
-# 3. JWKS 快取問題
-
-# 解決方案：確認 issuer-uri 配置正確
-# application-docker.yml 中應使用容器名稱
-```
-
-### 9.2 日誌檢視
-
-```bash
-# 檢視所有服務日誌
-docker compose logs -f
-
-# 檢視特定服務日誌
-docker compose logs -f keycloak
-docker compose logs -f openldap
-docker compose logs -f spring-api
-
-# 檢視最近 100 行
-docker compose logs --tail=100 keycloak
-```
-
-### 9.3 健康檢查
-
-```bash
-# OpenLDAP
-docker exec sso-openldap ldapsearch -x -H ldap://localhost \
-  -b "dc=example,dc=com" -D "cn=admin,dc=example,dc=com" -w admin123
-
-# Keycloak
-curl http://localhost:8080/health/ready
-
-# Spring API
-curl http://localhost:9090/actuator/health
-
-# PostgreSQL
-docker exec sso-postgres pg_isready -U keycloak
+# 5. 藍綠部署
+./deploy/scripts/blue-green-deploy.sh v1.1.0 green
+./deploy/scripts/blue-green-switch.sh green
+./deploy/scripts/blue-green-verify.sh
 ```
 
 ---
 
 ## 10. 附錄
 
-### 10.1 相關文件
+### 10.1 故障排除
 
-- [PRD.md](./PRD.md) - 業務需求文件
+```bash
+# 查看 Pod 日誌
+kubectl logs -f deployment/gateway-blue -n ecommerce
+
+# 查看 Pod 狀態
+kubectl get pods -n ecommerce -o wide
+
+# 進入 Pod
+kubectl exec -it <pod-name> -n ecommerce -- /bin/sh
+
+# 回滾
+./deploy/scripts/blue-green-switch.sh blue
+```
+
+### 10.2 Kind Cluster (本地 K8s 測試)
+
+本專案使用 Kind (Kubernetes in Docker) 進行本地 K8s 測試。
+
+```bash
+# 查看現有 cluster
+kind get clusters
+
+# 建立新 cluster (如果需要)
+kind create cluster --name rbac-sso-poc
+
+# 刪除 cluster
+kind delete cluster --name rbac-sso-poc
+
+# 載入本地 Docker image 到 Kind
+kind load docker-image ecommerce/gateway:latest --name rbac-sso-poc
+```
+
+### 10.3 目前運行的服務
+
+使用 `docker compose -f deploy/docker/docker-compose.infra.yml` 啟動的服務：
+
+| 服務 | Container Name | Port | 說明 |
+|------|---------------|------|------|
+| OpenLDAP | rbac-openldap | 389 | LDAP 目錄服務 |
+| phpLDAPadmin | rbac-phpldapadmin | 8181 | LDAP 管理介面 |
+| PostgreSQL | rbac-postgres | 5432 | Keycloak 資料庫 |
+| Keycloak | rbac-keycloak | 8180 | SSO / OAuth2 / OIDC |
+
+**存取資訊：**
+
+- Keycloak Admin Console: http://localhost:8180
+  - Username: `admin`
+  - Password: `admin123`
+
+- phpLDAPadmin: http://localhost:8181
+  - Login DN: `cn=admin,dc=ecommerce,dc=local`
+  - Password: `admin123`
+
+### 10.4 相關文件
+
+- [PRD.md](./PRD.md) - 業務需求與領域建模
 - [TECH.md](./TECH.md) - 技術架構文件
-- [Keycloak Documentation](https://www.keycloak.org/documentation)
-- [OpenLDAP Admin Guide](https://www.openldap.org/doc/admin26/)
-- [Spring Security Reference](https://docs.spring.io/spring-security/reference/)
-
-### 10.2 版本歷史
-
-| 版本 | 日期 | 變更說明 |
-|------|------|----------|
-| 1.0 | 2025-01-10 | 初始版本 |
+- [README.md](./README.md) - 專案說明
