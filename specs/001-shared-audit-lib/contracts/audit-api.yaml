@@ -1,0 +1,379 @@
+openapi: 3.0.3
+info:
+  title: Audit Library API
+  description: |
+    API contract for the shared audit library query endpoints.
+
+    This API provides read-only access to audit logs for compliance and
+    security review purposes. Audit logs are append-only and cannot be
+    modified or deleted through this API.
+  version: 1.0.0
+  contact:
+    name: RBAC-SSO-POC Team
+
+servers:
+  - url: /api/v1
+    description: Base path for audit API
+
+tags:
+  - name: Audit Queries
+    description: Query operations for audit logs
+
+paths:
+  /audit-logs:
+    get:
+      tags:
+        - Audit Queries
+      summary: Query audit logs
+      description: |
+        Retrieve audit logs with optional filtering by username, aggregate,
+        event type, service, and time range. Results are paginated and sorted
+        by timestamp descending (most recent first).
+      operationId: queryAuditLogs
+      parameters:
+        - name: username
+          in: query
+          description: Filter by executor username
+          required: false
+          schema:
+            type: string
+            example: "admin@example.com"
+        - name: aggregateType
+          in: query
+          description: Filter by aggregate/entity type
+          required: false
+          schema:
+            type: string
+            example: "Product"
+        - name: aggregateId
+          in: query
+          description: Filter by aggregate/entity ID (requires aggregateType)
+          required: false
+          schema:
+            type: string
+            example: "prod-12345"
+        - name: eventType
+          in: query
+          description: Filter by event type
+          required: false
+          schema:
+            type: string
+            example: "PRODUCT_CREATED"
+        - name: serviceName
+          in: query
+          description: Filter by originating service
+          required: false
+          schema:
+            type: string
+            example: "product-service"
+        - name: startTime
+          in: query
+          description: Filter by start time (inclusive, ISO 8601)
+          required: false
+          schema:
+            type: string
+            format: date-time
+            example: "2026-01-01T00:00:00Z"
+        - name: endTime
+          in: query
+          description: Filter by end time (exclusive, ISO 8601)
+          required: false
+          schema:
+            type: string
+            format: date-time
+            example: "2026-01-31T23:59:59Z"
+        - name: result
+          in: query
+          description: Filter by operation result
+          required: false
+          schema:
+            type: string
+            enum: [SUCCESS, FAILURE]
+        - name: page
+          in: query
+          description: Page number (0-indexed)
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          description: Page size
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Successful query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedAuditLogResponse'
+        '400':
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+        - bearerAuth: []
+
+  /audit-logs/{id}:
+    get:
+      tags:
+        - Audit Queries
+      summary: Get audit log by ID
+      description: Retrieve a single audit log entry by its unique identifier.
+      operationId: getAuditLogById
+      parameters:
+        - name: id
+          in: path
+          description: Audit log unique identifier
+          required: true
+          schema:
+            type: string
+            format: uuid
+            example: "550e8400-e29b-41d4-a716-446655440001"
+      responses:
+        '200':
+          description: Audit log found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Audit log not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+        - bearerAuth: []
+
+  /audit-logs/correlation/{correlationId}:
+    get:
+      tags:
+        - Audit Queries
+      summary: Get related audit logs by correlation ID
+      description: |
+        Retrieve all audit logs sharing the same correlation ID,
+        representing related operations within a business transaction.
+      operationId: getAuditLogsByCorrelationId
+      parameters:
+        - name: correlationId
+          in: path
+          description: Correlation ID linking related operations
+          required: true
+          schema:
+            type: string
+            example: "corr-abc-123"
+      responses:
+        '200':
+          description: Related audit logs found
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditLogResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+        - bearerAuth: []
+
+components:
+  schemas:
+    AuditLogResponse:
+      type: object
+      description: Single audit log entry
+      required:
+        - id
+        - timestamp
+        - eventType
+        - aggregateType
+        - username
+        - serviceName
+        - result
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique audit log identifier
+          example: "550e8400-e29b-41d4-a716-446655440001"
+        timestamp:
+          type: string
+          format: date-time
+          description: When the event occurred (UTC)
+          example: "2026-01-10T08:30:00.123Z"
+        eventType:
+          type: string
+          description: Type of audit event
+          example: "PRODUCT_CREATED"
+        aggregateType:
+          type: string
+          description: Entity type being audited
+          example: "Product"
+        aggregateId:
+          type: string
+          description: Entity ID being audited
+          nullable: true
+          example: "prod-12345"
+        username:
+          type: string
+          description: Executor identity
+          example: "admin@example.com"
+        serviceName:
+          type: string
+          description: Originating microservice
+          example: "product-service"
+        action:
+          type: string
+          description: Method/operation name
+          nullable: true
+          example: "createProduct"
+        payload:
+          type: string
+          description: JSON serialized operation payload (max 64KB)
+          nullable: true
+          example: "{\"productCode\":\"SKU-001\",\"productName\":\"Widget\"}"
+        result:
+          type: string
+          enum: [SUCCESS, FAILURE]
+          description: Operation result
+          example: "SUCCESS"
+        errorMessage:
+          type: string
+          description: Error details if operation failed
+          nullable: true
+          example: null
+        clientIp:
+          type: string
+          description: Client IP address
+          nullable: true
+          example: "192.168.1.100"
+        correlationId:
+          type: string
+          description: Links related operations
+          nullable: true
+          example: "corr-abc-123"
+        payloadTruncated:
+          type: boolean
+          description: True if payload was truncated due to size limit
+          example: false
+
+    PagedAuditLogResponse:
+      type: object
+      description: Paginated audit log response
+      required:
+        - content
+        - page
+        - size
+        - totalElements
+        - totalPages
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditLogResponse'
+          description: Audit log entries for current page
+        page:
+          type: integer
+          description: Current page number (0-indexed)
+          example: 0
+        size:
+          type: integer
+          description: Page size
+          example: 20
+        totalElements:
+          type: integer
+          format: int64
+          description: Total number of audit logs matching query
+          example: 150
+        totalPages:
+          type: integer
+          description: Total number of pages
+          example: 8
+        first:
+          type: boolean
+          description: True if this is the first page
+          example: true
+        last:
+          type: boolean
+          description: True if this is the last page
+          example: false
+
+    ErrorResponse:
+      type: object
+      description: Error response
+      required:
+        - status
+        - message
+        - timestamp
+      properties:
+        status:
+          type: integer
+          description: HTTP status code
+          example: 400
+        message:
+          type: string
+          description: Error message
+          example: "Invalid query parameter: startTime must be before endTime"
+        timestamp:
+          type: string
+          format: date-time
+          description: When the error occurred
+          example: "2026-01-10T08:30:00.123Z"
+        path:
+          type: string
+          description: Request path
+          example: "/api/v1/audit-logs"
+        traceId:
+          type: string
+          description: Trace ID for debugging
+          nullable: true
+          example: "abc123def456"
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token from OAuth2/OIDC authentication

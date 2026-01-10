@@ -4,7 +4,7 @@
 
 | 項目 | 內容 |
 |------|------|
-| 文件版本 | 3.1 |
+| 文件版本 | 3.2 |
 | 建立日期 | 2025-01-10 |
 | 最後更新 | 2026-01-10 |
 | 專案代號 | ECOMMERCE-MSA-POC |
@@ -1093,7 +1093,32 @@
 | **查詢效能** | 5 秒內回應（百萬筆記錄範圍查詢） |
 | **業務影響** | 稽核失敗不得阻擋業務操作（故障隔離） |
 
-### 7.7 可觀測性需求
+### 7.7 關聯追蹤 (Correlation ID)
+
+稽核日誌支援透過 Correlation ID 關聯同一交易中的多個操作：
+
+| 項目 | 規範 |
+|------|------|
+| **來源** | 從 MDC (Mapped Diagnostic Context) 自動擷取 |
+| **欄位名稱** | `correlationId` |
+| **格式** | UUID 或自訂 trace ID |
+| **用途** | 關聯同一請求/交易中產生的多筆稽核記錄 |
+| **預設值** | 若 MDC 中無 correlationId，則為 `null` |
+
+**實作機制**：`AuditContextHolder` 會從 MDC 中擷取 `correlationId`（或 `traceId`）欄位，自動寫入稽核日誌。
+
+### 7.8 動態設定重載
+
+稽核設定支援動態重載，無需重啟服務：
+
+| 項目 | 規範 |
+|------|------|
+| **機制** | `@ConfigurationProperties` + `@RefreshScope` |
+| **觸發方式** | Spring Cloud Config 更新 或 `/actuator/refresh` 端點 |
+| **可動態調整項目** | 遮蔽欄位清單、啟用/停用稽核、Payload 大小上限 |
+| **不可動態調整** | 稽核儲存目標、資料庫連線 |
+
+### 7.9 可觀測性需求
 
 稽核函式庫須提供以下監控指標：
 
@@ -1146,6 +1171,36 @@
 - [ ] 寫入吞吐量達標（100-500 events/second）
 - [ ] 擷取延遲 < 50ms（正常負載）
 - [ ] 查詢效能達標（百萬筆記錄 5 秒內回應）
+- [ ] 契約測試 (Contract Testing) 通過，確保 API 相容性
+
+### 8.5 契約測試驗收 (Consumer-Driven Contract)
+
+- [x] 使用 Spring Cloud Contract 定義 API 契約
+- [x] Provider 端自動產生並執行契約測試
+- [x] 產生 Stubs JAR 供 Consumer 端使用
+- [x] 契約涵蓋所有公開 API 端點（查詢、錯誤處理）
+- [ ] 契約測試整合至 CI/CD 流程
+
+### 8.6 安全管控驗收
+
+#### 南北向安全 (North-South)
+
+- [x] OAuth2 Resource Server 配置 (JWT 驗證)
+- [x] Keycloak Realm Role 提取與轉換
+- [x] CORS 配置支援跨域請求
+- [x] 端點授權 (@PreAuthorize) 保護稽核 API
+- [x] 公開端點白名單 (Actuator health/info)
+- [x] 可配置的安全屬性 (SecurityProperties)
+- [ ] TLS/HTTPS 加密傳輸
+
+#### 東西向安全 (East-West)
+
+- [x] OAuth2 Client Credentials Flow 實作
+- [x] ServiceTokenProvider Token 取得與快取
+- [x] ServiceAuthInterceptor 請求攔截器
+- [x] 預配置 RestTemplate (serviceRestTemplate)
+- [ ] mTLS 雙向憑證驗證
+- [ ] Kubernetes NetworkPolicy 網路隔離
 
 ---
 

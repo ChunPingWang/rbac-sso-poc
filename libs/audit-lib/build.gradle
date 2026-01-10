@@ -1,0 +1,98 @@
+plugins {
+    id 'java-library'
+    id 'org.springframework.boot' version '3.3.5' apply false
+    id 'io.spring.dependency-management' version '1.1.6'
+    id 'org.springframework.cloud.contract' version '4.1.4'
+    id 'maven-publish'
+}
+
+group = 'com.example'
+version = '1.0.0-SNAPSHOT'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencyManagement {
+    imports {
+        mavenBom org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:2023.0.3"
+    }
+}
+
+dependencies {
+    // Spring Boot starters
+    api 'org.springframework.boot:spring-boot-starter-aop'
+    api 'org.springframework.boot:spring-boot-starter-data-jpa'
+    api 'org.springframework.boot:spring-boot-starter-validation'
+    api 'org.springframework.boot:spring-boot-starter-actuator'
+
+    // Web support (optional - for query controller)
+    compileOnly 'org.springframework.boot:spring-boot-starter-web'
+
+    // Spring Cloud for @RefreshScope (dynamic config reload)
+    compileOnly 'org.springframework.cloud:spring-cloud-context:4.1.4'
+
+    // Security (for extracting user context and OAuth2 Resource Server)
+    compileOnly 'org.springframework.boot:spring-boot-starter-security'
+    compileOnly 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    compileOnly 'org.springframework.security:spring-security-oauth2-jose'
+
+    // Micrometer for metrics
+    api 'io.micrometer:micrometer-core'
+
+    // Jackson for JSON serialization
+    api 'com.fasterxml.jackson.core:jackson-databind'
+    api 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+
+    // Flyway for database migrations
+    api 'org.flywaydb:flyway-core'
+    api 'org.flywaydb:flyway-database-postgresql'
+
+    // H2 for testing
+    testRuntimeOnly 'com.h2database:h2'
+
+    // PostgreSQL for production
+    compileOnly 'org.postgresql:postgresql'
+
+    // Testing
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-web'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation 'com.tngtech.archunit:archunit-junit5:1.2.1'
+
+    // Spring Cloud Contract
+    testImplementation 'org.springframework.cloud:spring-cloud-starter-contract-verifier'
+    testImplementation 'org.springframework.cloud:spring-cloud-contract-wiremock'
+}
+
+// Spring Cloud Contract configuration
+contracts {
+    testFramework = org.springframework.cloud.contract.verifier.config.TestFramework.JUNIT5
+    baseClassForTests = 'com.example.audit.contract.BaseContractTest'
+    contractsDslDir = file("src/test/resources/contracts")
+}
+
+// Contract test task configuration
+contractTest {
+    useJUnitPlatform()
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+// Publishing stubs for consumers
+publishing {
+    publications {
+        stubs(MavenPublication) {
+            artifactId = "${project.name}"
+            artifact verifierStubsJar
+        }
+    }
+}

@@ -1,0 +1,119 @@
+# deploy/docker/docker-compose.infra.yml
+# 本地開發用：僅啟動 OpenLDAP + Keycloak + PostgreSQL
+# 使用方式: docker compose -f docker-compose.infra.yml up -d
+
+services:
+  # ============================================================
+  # OpenLDAP - 使用者目錄服務
+  # ============================================================
+  openldap:
+    image: osixia/openldap:1.5.0
+    container_name: rbac-openldap
+    environment:
+      LDAP_ORGANISATION: "E-Commerce Corp"
+      LDAP_DOMAIN: "ecommerce.local"
+      LDAP_BASE_DN: "dc=ecommerce,dc=local"
+      LDAP_ADMIN_PASSWORD: admin123
+      LDAP_CONFIG_PASSWORD: config123
+      LDAP_TLS: "false"
+      LDAP_TLS_VERIFY_CLIENT: "never"
+    ports:
+      - "389:389"
+      - "636:636"
+    volumes:
+      - ldap_data:/var/lib/ldap
+      - ldap_config:/etc/ldap/slapd.d
+    networks:
+      - rbac-network
+    healthcheck:
+      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://localhost", "-b", "dc=ecommerce,dc=local", "-D", "cn=admin,dc=ecommerce,dc=local", "-w", "admin123"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ============================================================
+  # phpLDAPadmin - LDAP 管理介面
+  # ============================================================
+  phpldapadmin:
+    image: osixia/phpldapadmin:0.9.0
+    container_name: rbac-phpldapadmin
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: openldap
+      PHPLDAPADMIN_HTTPS: "false"
+    ports:
+      - "8181:80"
+    depends_on:
+      openldap:
+        condition: service_healthy
+    networks:
+      - rbac-network
+
+  # ============================================================
+  # PostgreSQL - Keycloak 資料庫
+  # ============================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: rbac-postgres
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: keycloak123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - rbac-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================
+  # Keycloak - SSO / OAuth2 / OIDC 認證服務
+  # ============================================================
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: rbac-keycloak
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak123
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin123
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: 8180
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+    command: start-dev
+    ports:
+      - "8180:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      openldap:
+        condition: service_healthy
+    networks:
+      - rbac-network
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+networks:
+  rbac-network:
+    driver: bridge
+    name: rbac-network
+
+volumes:
+  ldap_data:
+    name: rbac-ldap-data
+  ldap_config:
+    name: rbac-ldap-config
+  postgres_data:
+    name: rbac-postgres-data

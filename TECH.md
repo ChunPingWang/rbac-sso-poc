@@ -4,7 +4,7 @@
 
 | 項目 | 內容 |
 |------|------|
-| 文件版本 | 3.1 |
+| 文件版本 | 3.2 |
 | 建立日期 | 2025-01-10 |
 | 最後更新 | 2026-01-10 |
 | 專案代號 | ECOMMERCE-MSA-POC |
@@ -28,6 +28,7 @@
 | Audit | audit-lib (Shared) | 1.0.x |
 | Metrics | Micrometer | 1.12.x |
 | Architecture Test | ArchUnit | 1.2.x |
+| Contract Test | Spring Cloud Contract | 4.1.x |
 | Container | Docker | 24.x |
 | Orchestration | Kubernetes | 1.28+ |
 
@@ -786,7 +787,216 @@ public class JpaProductRepository implements ProductRepository {
 
 ---
 
-## 6. 架構測試 (ArchUnit)
+## 6. 安全架構
+
+### 6.1 安全架構總覽
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           Security Architecture                                  │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────────┐ │
+│  │                    NORTH-SOUTH (外部 → 內部)                               │ │
+│  │                                                                             │ │
+│  │   Client ──► Gateway ──► OAuth2 Resource Server ──► @PreAuthorize ──► API  │ │
+│  │              (CORS)       (JWT Validation)          (Role Check)            │ │
+│  │                                                                             │ │
+│  │   Token Flow:                                                               │ │
+│  │   1. Client 向 Keycloak 取得 JWT Token                                      │ │
+│  │   2. Client 在 Authorization Header 附帶 Bearer Token                       │ │
+│  │   3. Resource Server 驗證 Token 簽章與有效期                                │ │
+│  │   4. 從 Token 中提取 Realm Roles → Spring Security Authorities              │ │
+│  │   5. @PreAuthorize 檢查角色權限                                             │ │
+│  └────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────────┐ │
+│  │                    EAST-WEST (服務 → 服務)                                 │ │
+│  │                                                                             │ │
+│  │   Service A ──► ServiceTokenProvider ──► OAuth2 Client Credentials ──►     │ │
+│  │                 (Get Token)              (Token Endpoint)                   │ │
+│  │                                                                             │ │
+│  │              ──► ServiceAuthInterceptor ──► Service B                       │ │
+│  │                  (Add Bearer Token)                                         │ │
+│  │                                                                             │ │
+│  │   Token Caching:                                                            │ │
+│  │   • 自動快取 Token，過期前 60 秒自動刷新                                     │ │
+│  │   • Thread-safe 設計，支援高併發                                            │ │
+│  └────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.2 安全配置
+
+#### SecurityProperties 配置
+
+```yaml
+# application.yml
+audit:
+  security:
+    enabled: true
+    issuer-uri: http://localhost:8180/realms/ecommerce
+    # jwk-set-uri: http://localhost:8180/realms/ecommerce/protocol/openid-connect/certs
+
+    # CORS 配置
+    cors:
+      enabled: true
+      allowed-origins:
+        - http://localhost:3000
+        - http://localhost:8080
+      allowed-methods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+      allowed-headers:
+        - Authorization
+        - Content-Type
+        - X-Correlation-ID
+      allow-credentials: true
+      max-age: 3600
+
+    # 公開端點（不需認證）
+    public-paths:
+      - /actuator/health
+      - /actuator/health/**
+      - /actuator/info
+
+    # 可存取稽核日誌的角色
+    audit-roles:
+      - ADMIN
+      - AUDITOR
+
+# 服務間認證 (East-West)
+  service-auth:
+    enabled: true
+    client-id: my-service-client
+    client-secret: ${SERVICE_CLIENT_SECRET}
+```
+
+#### SecurityAutoConfiguration
+
+```java
+// 自動配置 OAuth2 Resource Server
+@AutoConfiguration
+@ConditionalOnProperty(name = "audit.security.enabled", havingValue = "true")
+public class SecurityAutoConfiguration {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(AbstractHttpConfigurer::disable)
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+            .sessionManagement(session ->
+                session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/actuator/**").permitAll()
+                .requestMatchers("/api/v1/audit-logs/**").authenticated()
+                .anyRequest().authenticated()
+            )
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
+            );
+        return http.build();
+    }
+
+    @Bean
+    public JwtDecoder jwtDecoder() {
+        return JwtDecoders.fromIssuerLocation(issuerUri);
+    }
+}
+```
+
+#### Keycloak Role Mapping
+
+```java
+// 從 Keycloak JWT 提取角色
+class KeycloakRealmRoleConverter implements Converter<Jwt, Collection<GrantedAuthority>> {
+
+    @Override
+    public Collection<GrantedAuthority> convert(Jwt jwt) {
+        // JWT 結構:
+        // {
+        //   "realm_access": { "roles": ["ADMIN", "USER"] },
+        //   "resource_access": { "my-client": { "roles": ["manage"] } }
+        // }
+
+        Map<String, Object> realmAccess = jwt.getClaimAsMap("realm_access");
+        List<String> roles = (List<String>) realmAccess.get("roles");
+
+        return roles.stream()
+            .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
+            .collect(toList());
+    }
+}
+```
+
+### 6.3 端點授權
+
+```java
+// AuditQueryController.java
+@RestController
+@RequestMapping("/api/v1/audit-logs")
+@PreAuthorize("hasAnyRole('ADMIN', 'AUDITOR') or hasAuthority('SCOPE_audit:read')")
+public class AuditQueryController {
+
+    @GetMapping
+    public ResponseEntity<PagedResponse<AuditLogView>> queryAuditLogs(...) {
+        // 需要 ADMIN、AUDITOR 角色，或 audit:read scope
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<AuditLogView> getAuditLogById(@PathVariable UUID id) {
+        // 同上
+    }
+}
+```
+
+### 6.4 服務間認證 (East-West)
+
+```java
+// 使用預配置的 RestTemplate
+@Service
+public class ProductService {
+
+    private final RestTemplate serviceRestTemplate; // 自動注入
+
+    public ProductService(RestTemplate serviceRestTemplate) {
+        this.serviceRestTemplate = serviceRestTemplate;
+    }
+
+    public Product getProduct(UUID id) {
+        // 請求自動附帶 Bearer Token
+        return serviceRestTemplate.getForObject(
+            "http://product-service/api/products/" + id,
+            Product.class
+        );
+    }
+}
+
+// 或手動使用 ServiceTokenProvider
+@Service
+public class ManualAuthService {
+
+    private final ServiceTokenProvider tokenProvider;
+    private final RestTemplate restTemplate;
+
+    public void callService() {
+        String token = tokenProvider.getToken()
+            .orElseThrow(() -> new SecurityException("No token"));
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(token);
+
+        restTemplate.exchange(url, GET, new HttpEntity<>(headers), Response.class);
+    }
+}
+```
+
+---
+
+## 7. 架構測試 (ArchUnit)
 
 ```java
 // test/architecture/ArchitectureTest.java
@@ -851,6 +1061,145 @@ class ArchitectureTest {
             .that().resideInAPackage("..domain.model.valueobject..")
             .should().haveModifier(JavaModifier.FINAL)
             .check(classes);
+    }
+}
+```
+
+### 6.2 契約測試 (Spring Cloud Contract)
+
+採用 Consumer-Driven Contract (CDC) 模式，確保 API 相容性：
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                     Spring Cloud Contract Workflow                               │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  Provider (audit-lib)                    Consumer (微服務)                       │
+│  ══════════════════                      ═══════════════                         │
+│                                                                                  │
+│  1. 定義契約 (Groovy DSL)                                                        │
+│     src/test/resources/contracts/                                                │
+│     └── auditquery/                                                              │
+│         ├── shouldReturnAuditLogById.groovy                                      │
+│         ├── shouldReturnAuditLogsByUsername.groovy                               │
+│         └── ...                                                                  │
+│                                                                                  │
+│  2. 執行 contractTest                    3. 使用 Stubs JAR                       │
+│     ./gradlew contractTest                  testImplementation                   │
+│         │                                   'com.example:audit-lib:stubs'        │
+│         ▼                                       │                                │
+│     ┌─────────────────┐                         ▼                                │
+│     │ 自動產生測試    │                   ┌─────────────────┐                    │
+│     │ AuditqueryTest  │                   │ WireMock Stub   │                    │
+│     │ (6 tests)       │                   │ Server          │                    │
+│     └─────────────────┘                   └─────────────────┘                    │
+│                                                                                  │
+│  4. 發布 Stubs JAR                                                               │
+│     ./gradlew publishStubsPublicationToMavenLocal                                │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 契約定義範例
+
+```groovy
+// src/test/resources/contracts/auditquery/shouldReturnAuditLogById.groovy
+Contract.make {
+    name "should return audit log by ID"
+    description "Returns a single audit log entry by its unique ID"
+
+    request {
+        method GET()
+        url "/api/v1/audit-logs/550e8400-e29b-41d4-a716-446655440000"
+        headers {
+            contentType applicationJson()
+        }
+    }
+
+    response {
+        status OK()
+        headers {
+            contentType applicationJson()
+        }
+        body([
+            id: "550e8400-e29b-41d4-a716-446655440000",
+            eventType: "PRODUCT_CREATED",
+            aggregateType: "Product",
+            username: "admin@example.com",
+            result: "SUCCESS"
+        ])
+        bodyMatchers {
+            jsonPath('$.id', byRegex('[a-f0-9-]{36}'))
+            jsonPath('$.timestamp', byRegex('[0-9]{4}-[0-9]{2}-[0-9]{2}T.*'))
+        }
+    }
+}
+```
+
+#### BaseContractTest
+
+```java
+// src/test/java/com/example/audit/contract/BaseContractTest.java
+public abstract class BaseContractTest {
+
+    private AuditQueryService queryService;
+
+    @BeforeEach
+    public void setup() {
+        queryService = mock(AuditQueryService.class);
+        setupMockResponses();
+
+        // 配置 Jackson ObjectMapper
+        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JavaTimeModule());
+        objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+        AuditQueryController controller = new AuditQueryController(queryService);
+        RestAssuredMockMvc.standaloneSetup(
+            MockMvcBuilders.standaloneSetup(controller)
+                .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
+        );
+    }
+
+    private void setupMockResponses() {
+        // Mock 回傳值設定...
+    }
+}
+```
+
+#### Gradle 配置
+
+```groovy
+// libs/audit-lib/build.gradle
+plugins {
+    id 'org.springframework.cloud.contract' version '4.1.4'
+    id 'maven-publish'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:2023.0.3"
+    }
+}
+
+dependencies {
+    testImplementation 'org.springframework.cloud:spring-cloud-starter-contract-verifier'
+    testImplementation 'org.springframework.cloud:spring-cloud-contract-wiremock'
+}
+
+contracts {
+    testFramework = TestFramework.JUNIT5
+    baseClassForTests = 'com.example.audit.contract.BaseContractTest'
+    contractsDslDir = file("src/test/resources/contracts")
+}
+
+publishing {
+    publications {
+        stubs(MavenPublication) {
+            artifact verifierStubsJar
+            artifactId = "${project.name}"
+            version = "${project.version}-stubs"
+        }
     }
 }
 ```
@@ -1160,6 +1509,7 @@ public class AuditAspect {
             .result(error == null ? "SUCCESS" : "FAILURE")
             .errorMessage(error != null ? error.getMessage() : null)
             .clientIp(contextHolder.getClientIp().orElse("unknown"))
+            .correlationId(contextHolder.getCorrelationId().orElse(null))  // 從 MDC 擷取
             .build();
 
         repository.save(log);
@@ -1171,7 +1521,69 @@ public class AuditAspect {
 }
 ```
 
-#### 9.2.3 PayloadProcessor
+#### 9.2.3 AuditContextHolder
+
+```java
+// libs/audit-lib/src/main/java/com/example/audit/context/AuditContextHolder.java
+package com.example.audit.context;
+
+import org.slf4j.MDC;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+import java.util.Optional;
+
+/**
+ * 稽核上下文持有者 - 從各種來源擷取稽核所需資訊
+ */
+@Component
+public class AuditContextHolder {
+
+    private final AuditProperties properties;
+
+    /** 從 SecurityContext 取得當前使用者名稱 */
+    public Optional<String> getCurrentUsername() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.isAuthenticated()) {
+            return Optional.of(auth.getName());
+        }
+        return Optional.of("ANONYMOUS");
+    }
+
+    /** 從 RequestContext 取得 Client IP */
+    public Optional<String> getClientIp() {
+        var attrs = RequestContextHolder.getRequestAttributes();
+        if (attrs instanceof ServletRequestAttributes servletAttrs) {
+            var request = servletAttrs.getRequest();
+            String ip = request.getHeader("X-Forwarded-For");
+            return Optional.ofNullable(ip != null ? ip.split(",")[0].trim()
+                                                  : request.getRemoteAddr());
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * 從 MDC 取得 Correlation ID
+     * 支援多種常見 key: correlationId, traceId, X-Correlation-ID
+     */
+    public Optional<String> getCorrelationId() {
+        String correlationId = MDC.get("correlationId");
+        if (correlationId == null) {
+            correlationId = MDC.get("traceId");
+        }
+        if (correlationId == null) {
+            correlationId = MDC.get("X-Correlation-ID");
+        }
+        return Optional.ofNullable(correlationId);
+    }
+
+    public String getServiceName() {
+        return properties.getServiceName();
+    }
+}
+```
+
+#### 9.2.4 PayloadProcessor
 
 ```java
 // libs/audit-lib/src/main/java/com/example/audit/processor/PayloadProcessor.java
@@ -1244,7 +1656,55 @@ dependencies {
 }
 ```
 
-#### 9.3.2 自動配置
+#### 9.3.2 AuditProperties（動態設定）
+
+```java
+// libs/audit-lib/src/main/java/com/example/audit/config/AuditProperties.java
+package com.example.audit.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import java.util.List;
+
+/**
+ * 稽核設定屬性 - 支援動態重載
+ *
+ * 使用 @RefreshScope 搭配 @ConfigurationProperties
+ * 透過 /actuator/refresh 端點或 Spring Cloud Config 觸發重載
+ */
+@RefreshScope
+@ConfigurationProperties(prefix = "audit")
+public class AuditProperties {
+
+    /** 是否啟用稽核 */
+    private boolean enabled = true;
+
+    /** 服務名稱（用於識別稽核來源） */
+    private String serviceName;
+
+    /** Payload 設定 */
+    private Payload payload = new Payload();
+
+    /** 遮蔽設定 */
+    private Masking masking = new Masking();
+
+    public static class Payload {
+        /** Payload 最大大小（bytes），預設 64 KB */
+        private int maxSize = 65536;
+        // getters/setters
+    }
+
+    public static class Masking {
+        /** 預設遮蔽欄位清單 */
+        private List<String> defaultFields = List.of("password", "secret", "token");
+        // getters/setters
+    }
+
+    // getters/setters
+}
+```
+
+#### 9.3.3 自動配置
 
 ```java
 // libs/audit-lib/src/main/java/com/example/audit/config/AuditAutoConfiguration.java
@@ -1252,6 +1712,7 @@ package com.example.audit.config;
 
 @Configuration
 @EnableAspectJAutoProxy
+@EnableConfigurationProperties(AuditProperties.class)
 @ConditionalOnProperty(name = "audit.enabled", havingValue = "true", matchIfMissing = true)
 public class AuditAutoConfiguration {
 
@@ -1259,8 +1720,15 @@ public class AuditAutoConfiguration {
     @ConditionalOnMissingBean
     public AuditAspect auditAspect(AuditLogRepository repository,
                                     PayloadProcessor processor,
-                                    AuditMetrics metrics) {
-        return new AuditAspect(repository, processor, metrics);
+                                    AuditMetrics metrics,
+                                    AuditContextHolder contextHolder) {
+        return new AuditAspect(repository, processor, metrics, contextHolder);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AuditContextHolder auditContextHolder(AuditProperties properties) {
+        return new AuditContextHolder(properties);
     }
 
     @Bean
@@ -1276,7 +1744,7 @@ public class AuditAutoConfiguration {
 }
 ```
 
-#### 9.3.3 應用程式配置
+#### 9.3.4 應用程式配置
 
 ```yaml
 # application.yml
@@ -1316,7 +1784,10 @@ libs/audit-lib/
     ├── aspect/
     │   └── AuditAspect.java
     ├── config/
-    │   └── AuditAutoConfiguration.java
+    │   ├── AuditAutoConfiguration.java
+    │   └── AuditProperties.java           # @RefreshScope 支援動態重載
+    ├── context/
+    │   └── AuditContextHolder.java        # 從 SecurityContext/MDC 擷取上下文
     ├── domain/
     │   └── AuditLog.java
     ├── metrics/

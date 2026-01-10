@@ -75,7 +75,7 @@ As a **microservice developer**, I want to configure which operations are audite
 
 2. **Given** audit configuration specifies fields to mask, **When** an audit log is created, **Then** sensitive fields are masked with partial visibility (e.g., `"password": "****"`, `"creditCard": "****-****-****-1234"`) preserving format while hiding actual values.
 
-3. **Given** audit configuration is changed, **When** subsequent operations execute, **Then** the new configuration is applied without requiring service restart.
+3. **Given** audit configuration is changed (via Spring Cloud Config or environment update with `/actuator/refresh` endpoint), **When** subsequent operations execute, **Then** the new configuration is applied without requiring service restart. **Implementation**: Uses `@ConfigurationProperties` with `@RefreshScope` for dynamic reload.
 
 ---
 
