@@ -23,10 +23,10 @@ CREATE INDEX IF NOT EXISTS idx_audit_event_type
 CREATE INDEX IF NOT EXISTS idx_audit_service
     ON audit_logs(service_name, timestamp DESC);
 
--- Partial index for correlation ID (only non-null values)
+-- Index for correlation ID
+-- Note: Partial index (WHERE clause) removed for H2 compatibility
 CREATE INDEX IF NOT EXISTS idx_audit_correlation
-    ON audit_logs(correlation_id)
-    WHERE correlation_id IS NOT NULL;
+    ON audit_logs(correlation_id);
 
 -- Index for result filtering (SUCCESS/FAILURE)
 CREATE INDEX IF NOT EXISTS idx_audit_result

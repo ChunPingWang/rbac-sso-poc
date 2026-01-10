@@ -142,19 +142,20 @@ services:
     container_name: rbac-user-service
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8082
       KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/ecommerce
       SPRING_DATASOURCE_URL: jdbc:h2:file:/data/userdb
     volumes:
       - user_service_data:/data
     ports:
-      - "8081:8081"
+      - "8082:8082"
     depends_on:
       keycloak:
         condition: service_healthy
     networks:
       - rbac-network
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/actuator/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8082/actuator/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -170,19 +171,20 @@ services:
     container_name: rbac-product-service
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8081
       KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/ecommerce
       SPRING_DATASOURCE_URL: jdbc:h2:file:/data/productdb
     volumes:
       - product_service_data:/data
     ports:
-      - "8082:8082"
+      - "8081:8081"
     depends_on:
       keycloak:
         condition: service_healthy
     networks:
       - rbac-network
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8082/actuator/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/actuator/health"]
       interval: 30s
       timeout: 5s
       retries: 3

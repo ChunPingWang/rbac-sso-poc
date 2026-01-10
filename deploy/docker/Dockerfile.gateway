@@ -1,0 +1,17 @@
+# Gateway Service Dockerfile
+FROM eclipse-temurin:17-jre-jammy
+
+LABEL maintainer="RBAC-SSO-POC Team"
+LABEL description="API Gateway Service"
+
+WORKDIR /app
+
+# Copy the JAR file
+COPY services/gateway-service/build/libs/gateway-service-1.0.0-SNAPSHOT.jar app.jar
+
+# JVM options for containers
+ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/./urandom"
+
+EXPOSE 8080
+
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
