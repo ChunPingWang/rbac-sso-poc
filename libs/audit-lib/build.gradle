@@ -1,0 +1,67 @@
+plugins {
+    id 'java-library'
+    id 'org.springframework.boot' version '3.3.5' apply false
+    id 'io.spring.dependency-management' version '1.1.6'
+}
+
+group = 'com.example'
+version = '1.0.0-SNAPSHOT'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencyManagement {
+    imports {
+        mavenBom org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES
+    }
+}
+
+dependencies {
+    // Spring Boot starters
+    api 'org.springframework.boot:spring-boot-starter-aop'
+    api 'org.springframework.boot:spring-boot-starter-data-jpa'
+    api 'org.springframework.boot:spring-boot-starter-validation'
+    api 'org.springframework.boot:spring-boot-starter-actuator'
+
+    // Web support (optional - for query controller)
+    compileOnly 'org.springframework.boot:spring-boot-starter-web'
+
+    // Spring Cloud for @RefreshScope (dynamic config reload)
+    compileOnly 'org.springframework.cloud:spring-cloud-context:4.1.4'
+
+    // Security (for extracting user context)
+    compileOnly 'org.springframework.boot:spring-boot-starter-security'
+
+    // Micrometer for metrics
+    api 'io.micrometer:micrometer-core'
+
+    // Jackson for JSON serialization
+    api 'com.fasterxml.jackson.core:jackson-databind'
+    api 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+
+    // Flyway for database migrations
+    api 'org.flywaydb:flyway-core'
+    api 'org.flywaydb:flyway-database-postgresql'
+
+    // H2 for testing
+    testRuntimeOnly 'com.h2database:h2'
+
+    // PostgreSQL for production
+    compileOnly 'org.postgresql:postgresql'
+
+    // Testing
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-web'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation 'com.tngtech.archunit:archunit-junit5:1.2.1'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

@@ -1,0 +1,36 @@
+spring:
+  main:
+    allow-bean-definition-overriding: true
+
+  datasource:
+    url: jdbc:h2:mem:auditdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  flyway:
+    enabled: false  # Use Hibernate DDL for tests
+
+audit:
+  enabled: true
+  service-name: test-service
+  payload:
+    max-size: 65536
+  masking:
+    default-fields:
+      - password
+      - secret
+      - token
+
+logging:
+  level:
+    com.example.audit: DEBUG
+    org.springframework.aop: DEBUG

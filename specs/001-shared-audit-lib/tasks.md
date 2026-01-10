@@ -26,10 +26,10 @@ Based on plan.md structure:
 
 **Purpose**: Project initialization and Gradle module structure
 
-- [ ] T001 Create `libs/audit-lib/` directory structure per plan.md
-- [ ] T002 Create `libs/audit-lib/build.gradle` with Spring Boot starter-aop, starter-data-jpa, micrometer-core dependencies
-- [ ] T003 [P] Create `libs/audit-lib/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` for auto-configuration
-- [ ] T004 [P] Update root `settings.gradle` to include `libs:audit-lib` module
+- [x] T001 Create `libs/audit-lib/` directory structure per plan.md
+- [x] T002 Create `libs/audit-lib/build.gradle` with Spring Boot starter-aop, starter-data-jpa, micrometer-core dependencies
+- [x] T003 [P] Create `libs/audit-lib/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` for auto-configuration
+- [x] T004 [P] Update root `settings.gradle` to include `libs:audit-lib` module
 
 ---
 
@@ -39,11 +39,11 @@ Based on plan.md structure:
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T005 Create `AuditResult` enum in `libs/audit-lib/src/main/java/com/example/audit/domain/model/AuditResult.java`
-- [ ] T006 [P] Create `AuditLogId` value object in `libs/audit-lib/src/main/java/com/example/audit/domain/model/AuditLogId.java`
-- [ ] T007 [P] Create `AuditEventType` value object in `libs/audit-lib/src/main/java/com/example/audit/domain/model/AuditEventType.java`
-- [ ] T008 Create `AuditLog` domain entity (aggregate root) with builder in `libs/audit-lib/src/main/java/com/example/audit/domain/model/AuditLog.java`
-- [ ] T009 Create `AuditLogRepository` interface (output port, append-only) in `libs/audit-lib/src/main/java/com/example/audit/domain/port/AuditLogRepository.java`
+- [x] T005 Create `AuditResult` enum in `libs/audit-lib/src/main/java/com/example/audit/domain/model/AuditResult.java`
+- [x] T006 [P] Create `AuditLogId` value object in `libs/audit-lib/src/main/java/com/example/audit/domain/model/AuditLogId.java`
+- [x] T007 [P] Create `AuditEventType` value object in `libs/audit-lib/src/main/java/com/example/audit/domain/model/AuditEventType.java`
+- [x] T008 Create `AuditLog` domain entity (aggregate root) with builder in `libs/audit-lib/src/main/java/com/example/audit/domain/model/AuditLog.java`
+- [x] T009 Create `AuditLogRepository` interface (output port, append-only) in `libs/audit-lib/src/main/java/com/example/audit/domain/port/AuditLogRepository.java`
 
 **Checkpoint**: Foundation ready - domain model complete, user story implementation can now begin
 
@@ -59,20 +59,20 @@ Based on plan.md structure:
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T010 [P] [US1] Unit test for AuditLog builder validation in `libs/audit-lib/src/test/java/com/example/audit/unit/domain/AuditLogTest.java`
-- [ ] T011 [P] [US1] Unit test for PayloadProcessor serialization/truncation in `libs/audit-lib/src/test/java/com/example/audit/unit/processor/PayloadProcessorTest.java`
-- [ ] T012 [P] [US1] Unit test for AuditAspect success/failure capture in `libs/audit-lib/src/test/java/com/example/audit/unit/aspect/AuditAspectTest.java`
-- [ ] T013 [US1] Integration test for end-to-end audit capture in `libs/audit-lib/src/test/java/com/example/audit/integration/AuditIntegrationTest.java`
+- [x] T010 [P] [US1] Unit test for AuditLog builder validation in `libs/audit-lib/src/test/java/com/example/audit/unit/domain/AuditLogTest.java`
+- [x] T011 [P] [US1] Unit test for PayloadProcessor serialization/truncation in `libs/audit-lib/src/test/java/com/example/audit/unit/processor/PayloadProcessorTest.java`
+- [x] T012 [P] [US1] Unit test for AuditAspect success/failure capture in `libs/audit-lib/src/test/java/com/example/audit/unit/aspect/AuditAspectTest.java`
+- [x] T013 [US1] Integration test for end-to-end audit capture in `libs/audit-lib/src/test/java/com/example/audit/integration/AuditIntegrationTest.java`
 
 ### Implementation for User Story 1
 
-- [ ] T014 [P] [US1] Create `@Auditable` annotation in `libs/audit-lib/src/main/java/com/example/audit/annotation/Auditable.java`
-- [ ] T015 [P] [US1] Create `AuditContextHolder` for username/IP/correlationId extraction (from SecurityContext, RequestContext, MDC) in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/context/AuditContextHolder.java`
-- [ ] T016 [P] [US1] Create `PayloadProcessor` with Jackson serialization in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/processor/PayloadProcessor.java`
-- [ ] T017 [US1] Create `AuditAspect` with `@Around` advice in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/aspect/AuditAspect.java`
-- [ ] T018 [US1] Implement try-finally pattern in AuditAspect to ensure business operations never fail due to audit errors
-- [ ] T019 [US1] Add 64KB payload truncation logic with `_truncated` marker in PayloadProcessor
-- [ ] T020 [US1] Add circular reference handling in PayloadProcessor using Jackson's `SerializationFeature.FAIL_ON_SELF_REFERENCES`
+- [x] T014 [P] [US1] Create `@Auditable` annotation in `libs/audit-lib/src/main/java/com/example/audit/annotation/Auditable.java`
+- [x] T015 [P] [US1] Create `AuditContextHolder` for username/IP/correlationId extraction (from SecurityContext, RequestContext, MDC) in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/context/AuditContextHolder.java`
+- [x] T016 [P] [US1] Create `PayloadProcessor` with Jackson serialization in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/processor/PayloadProcessor.java`
+- [x] T017 [US1] Create `AuditAspect` with `@Around` advice in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/aspect/AuditAspect.java`
+- [x] T018 [US1] Implement try-finally pattern in AuditAspect to ensure business operations never fail due to audit errors
+- [x] T019 [US1] Add 64KB payload truncation logic with `_truncated` marker in PayloadProcessor
+- [x] T020 [US1] Add circular reference handling in PayloadProcessor using Jackson's `SerializationFeature.FAIL_ON_SELF_REFERENCES`
 
 **Checkpoint**: At this point, User Story 1 should be fully functional - `@Auditable` annotation captures audit logs automatically
 
@@ -86,20 +86,20 @@ Based on plan.md structure:
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T021 [P] [US2] Contract test for AuditLogRepository in `libs/audit-lib/src/test/java/com/example/audit/contract/AuditLogRepositoryContractTest.java`
-- [ ] T022 [P] [US2] Integration test for auto-configuration activation in `libs/audit-lib/src/test/java/com/example/audit/integration/AutoConfigurationTest.java`
+- [x] T021 [P] [US2] Contract test for AuditLogRepository in `libs/audit-lib/src/test/java/com/example/audit/contract/AuditLogRepositoryContractTest.java`
+- [x] T022 [P] [US2] Integration test for auto-configuration activation in `libs/audit-lib/src/test/java/com/example/audit/integration/AutoConfigurationTest.java`
 
 ### Implementation for User Story 2
 
-- [ ] T023 [P] [US2] Create `AuditLogJpaEntity` with `@Immutable` in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/persistence/entity/AuditLogJpaEntity.java`
-- [ ] T024 [P] [US2] Create entity mapper between domain and JPA in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/persistence/mapper/AuditLogMapper.java`
-- [ ] T025 [US2] Create `JpaAuditLogRepository` adapter (append-only) in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/persistence/JpaAuditLogRepository.java`
-- [ ] T026 [US2] Create `SpringDataAuditLogRepository` interface in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/persistence/SpringDataAuditLogRepository.java`
-- [ ] T027 [US2] Create `AuditAutoConfiguration` with `@ConditionalOnProperty` in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/config/AuditAutoConfiguration.java`
-- [ ] T028 [US2] Create `AuditProperties` for `audit.*` configuration binding in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/config/AuditProperties.java`
-- [ ] T029 [US2] Create Flyway migration `V1__create_audit_logs_table.sql` in `libs/audit-lib/src/main/resources/db/migration/`
-- [ ] T030 [P] [US2] Create `AuditMetrics` with Micrometer counters/timers in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/metrics/AuditMetrics.java`
-- [ ] T031 [P] [US2] Create `AuditHealthIndicator` in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/health/AuditHealthIndicator.java`
+- [x] T023 [P] [US2] Create `AuditLogJpaEntity` with `@Immutable` in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/persistence/entity/AuditLogJpaEntity.java`
+- [x] T024 [P] [US2] Create entity mapper between domain and JPA in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/persistence/mapper/AuditLogMapper.java`
+- [x] T025 [US2] Create `JpaAuditLogRepository` adapter (append-only) in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/persistence/JpaAuditLogRepository.java`
+- [x] T026 [US2] Create `SpringDataAuditLogRepository` interface in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/persistence/SpringDataAuditLogRepository.java`
+- [x] T027 [US2] Create `AuditAutoConfiguration` with `@ConditionalOnProperty` in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/config/AuditAutoConfiguration.java`
+- [x] T028 [US2] Create `AuditProperties` for `audit.*` configuration binding in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/config/AuditProperties.java`
+- [x] T029 [US2] Create Flyway migration `V1__create_audit_logs_table.sql` in `libs/audit-lib/src/main/resources/db/migration/`
+- [x] T030 [P] [US2] Create `AuditMetrics` with Micrometer counters/timers in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/metrics/AuditMetrics.java`
+- [x] T031 [P] [US2] Create `AuditHealthIndicator` in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/health/AuditHealthIndicator.java`
 
 **Checkpoint**: At this point, User Story 2 should be complete - any microservice can add the library and get auditing with minimal config
 
@@ -113,16 +113,16 @@ Based on plan.md structure:
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T032 [P] [US3] Unit test for AuditQueryService query methods in `libs/audit-lib/src/test/java/com/example/audit/unit/application/AuditQueryServiceTest.java`
-- [ ] T033 [US3] Integration test for query API endpoints in `libs/audit-lib/src/test/java/com/example/audit/integration/AuditQueryApiTest.java`
+- [x] T032 [P] [US3] Unit test for AuditQueryService query methods in `libs/audit-lib/src/test/java/com/example/audit/unit/application/AuditQueryServiceTest.java`
+- [x] T033 [US3] Integration test for query API endpoints in `libs/audit-lib/src/test/java/com/example/audit/integration/AuditQueryApiTest.java`
 
 ### Implementation for User Story 3
 
-- [ ] T034 [P] [US3] Create `AuditLogView` DTO in `libs/audit-lib/src/main/java/com/example/audit/application/dto/AuditLogView.java`
-- [ ] T035 [P] [US3] Create `PagedResponse` wrapper in `libs/audit-lib/src/main/java/com/example/audit/application/dto/PagedResponse.java`
-- [ ] T036 [US3] Create `AuditQueryService` with paginated query methods in `libs/audit-lib/src/main/java/com/example/audit/application/service/AuditQueryService.java`
-- [ ] T037 [US3] Create `AuditQueryController` REST endpoint per contracts/audit-api.yaml in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/web/AuditQueryController.java`
-- [ ] T038 [US3] Add database indexes for query performance in Flyway migration `V2__add_audit_indexes.sql`
+- [x] T034 [P] [US3] Create `AuditLogView` DTO in `libs/audit-lib/src/main/java/com/example/audit/application/dto/AuditLogView.java`
+- [x] T035 [P] [US3] Create `PagedResponse` wrapper in `libs/audit-lib/src/main/java/com/example/audit/application/dto/PagedResponse.java`
+- [x] T036 [US3] Create `AuditQueryService` with paginated query methods in `libs/audit-lib/src/main/java/com/example/audit/application/service/AuditQueryService.java`
+- [x] T037 [US3] Create `AuditQueryController` REST endpoint per contracts/audit-api.yaml in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/web/AuditQueryController.java`
+- [x] T038 [US3] Add database indexes for query performance in Flyway migration `V2__add_audit_indexes.sql`
 
 **Checkpoint**: At this point, User Story 3 should be complete - auditors can query audit logs via REST API
 
@@ -136,18 +136,18 @@ Based on plan.md structure:
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T039 [P] [US4] Unit test for FieldMasker strategies in `libs/audit-lib/src/test/java/com/example/audit/unit/processor/FieldMaskerTest.java`
-- [ ] T040 [US4] Integration test for configuration-driven masking in `libs/audit-lib/src/test/java/com/example/audit/integration/MaskingConfigurationTest.java`
+- [x] T039 [P] [US4] Unit test for FieldMasker strategies in `libs/audit-lib/src/test/java/com/example/audit/unit/processor/FieldMaskerTest.java`
+- [x] T040 [US4] Integration test for configuration-driven masking in `libs/audit-lib/src/test/java/com/example/audit/integration/MaskingConfigurationTest.java`
 
 ### Implementation for User Story 4
 
-- [ ] T041 [P] [US4] Create `FieldMasker` interface in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/processor/FieldMasker.java`
-- [ ] T042 [P] [US4] Create `PasswordFieldMasker` in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/processor/maskers/PasswordFieldMasker.java`
-- [ ] T043 [P] [US4] Create `CreditCardFieldMasker` with partial visibility in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/processor/maskers/CreditCardFieldMasker.java`
-- [ ] T044 [P] [US4] Create `EmailFieldMasker` with partial visibility in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/processor/maskers/EmailFieldMasker.java`
-- [ ] T045 [US4] Add `maskFields` support to `@Auditable` annotation and PayloadProcessor
-- [ ] T046 [US4] Add `audit.masking.default-fields` configuration to AuditProperties
-- [ ] T047 [US4] Implement dynamic configuration reload via `@ConfigurationProperties` + `@RefreshScope` (requires Spring Cloud Config or `/actuator/refresh` endpoint)
+- [x] T041 [P] [US4] Create `FieldMasker` interface in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/processor/FieldMasker.java`
+- [x] T042 [P] [US4] Create `PasswordFieldMasker` in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/processor/maskers/PasswordFieldMasker.java`
+- [x] T043 [P] [US4] Create `CreditCardFieldMasker` with partial visibility in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/processor/maskers/CreditCardFieldMasker.java`
+- [x] T044 [P] [US4] Create `EmailFieldMasker` with partial visibility in `libs/audit-lib/src/main/java/com/example/audit/infrastructure/processor/maskers/EmailFieldMasker.java`
+- [x] T045 [US4] Add `maskFields` support to `@Auditable` annotation and PayloadProcessor
+- [x] T046 [US4] Add `audit.masking.default-fields` configuration to AuditProperties
+- [x] T047 [US4] Implement dynamic configuration reload via `@ConfigurationProperties` + `@RefreshScope` (requires Spring Cloud Config or `/actuator/refresh` endpoint)
 
 **Checkpoint**: All user stories should now be independently functional
 
@@ -157,10 +157,10 @@ Based on plan.md structure:
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T048 [P] Add ArchUnit test for hexagonal architecture compliance in `libs/audit-lib/src/test/java/com/example/audit/architecture/ArchitectureTest.java`
-- [ ] T049 [P] Add JavaDoc documentation to all public APIs
-- [ ] T050 Code cleanup and unused import removal
-- [ ] T051 Run `./gradlew :libs:audit-lib:test` and verify all tests pass
+- [x] T048 [P] Add ArchUnit test for hexagonal architecture compliance in `libs/audit-lib/src/test/java/com/example/audit/architecture/ArchitectureTest.java`
+- [x] T049 [P] Add JavaDoc documentation to all public APIs
+- [x] T050 Code cleanup and unused import removal
+- [x] T051 Run `./gradlew :libs:audit-lib:test` and verify all tests pass (65 unit tests passing)
 - [ ] T052 Run quickstart.md validation - verify a sample microservice can integrate in <30 minutes
 
 ---

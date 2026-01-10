@@ -99,10 +99,10 @@ ecommerce-msa/
 │   │       └── service.yaml
 │   │
 │   └── scripts/
-│       ├── build-all.sh
-│       ├── docker-up.sh
-│       ├── docker-down.sh
-│       ├── k8s-deploy.sh
+│       ├── start-local.sh           # 本地開發 (Docker infra + OS Java)
+│       ├── start-docker.sh          # Docker Compose 完整環境
+│       ├── start-k8s.sh             # Kubernetes 部署 (Kind)
+│       ├── load-test.sh             # 壓力測試腳本
 │       ├── blue-green-deploy.sh
 │       ├── blue-green-switch.sh
 │       └── blue-green-verify.sh
@@ -1236,3 +1236,228 @@ kind load docker-image ecommerce/gateway:latest --name rbac-sso-poc
 - [PRD.md](./PRD.md) - 業務需求與領域建模
 - [TECH.md](./TECH.md) - 技術架構文件
 - [README.md](./README.md) - 專案說明
+
+---
+
+## 11. 快速啟動腳本
+
+本專案提供多種部署腳本，適用於不同開發與測試情境。
+
+### 11.1 腳本總覽
+
+| 腳本 | 用途 | 基礎設施 | Java 應用 |
+|------|------|----------|-----------|
+| `start-local.sh` | 本地開發 | Docker | OS (Gradle) |
+| `start-docker.sh` | 整合測試 | Docker | Docker |
+| `start-k8s.sh` | K8s 測試 | Kind/K8s | K8s |
+| `load-test.sh` | 壓力測試 | - | - |
+
+### 11.2 本地開發模式 (start-local.sh)
+
+基礎設施使用 Docker，Java 應用直接在 OS 上運行，適合開發與除錯。
+
+```bash
+# 啟動所有服務
+./deploy/scripts/start-local.sh start
+
+# 停止所有服務
+./deploy/scripts/start-local.sh stop
+
+# 重啟
+./deploy/scripts/start-local.sh restart
+
+# 查看狀態
+./deploy/scripts/start-local.sh status
+
+# 查看日誌
+./deploy/scripts/start-local.sh logs           # 所有 Docker 日誌
+./deploy/scripts/start-local.sh logs keycloak  # 特定服務日誌
+./deploy/scripts/start-local.sh logs gateway   # Java 應用日誌
+```
+
+**架構圖：**
+
+```mermaid
+flowchart LR
+    subgraph Docker["Docker"]
+        LDAP[(OpenLDAP)]
+        PG[(PostgreSQL)]
+        KC[Keycloak]
+        PHPADMIN[phpLDAPadmin]
+    end
+
+    subgraph OS["本地 OS"]
+        GW[Gateway<br/>:8080]
+        US[User Service<br/>:8081]
+        PS[Product Service<br/>:8082]
+    end
+
+    GW --> KC
+    US --> KC
+    PS --> KC
+    KC --> LDAP
+    KC --> PG
+```
+
+### 11.3 Docker 完整環境 (start-docker.sh)
+
+所有服務都在 Docker 中運行，適合整合測試。
+
+```bash
+# 啟動所有服務
+./deploy/scripts/start-docker.sh start
+
+# 僅啟動基礎設施
+./deploy/scripts/start-docker.sh start-infra
+
+# 停止服務
+./deploy/scripts/start-docker.sh stop
+
+# 重新建置並啟動
+./deploy/scripts/start-docker.sh build
+./deploy/scripts/start-docker.sh restart
+
+# 清理資源 (包含 volumes)
+./deploy/scripts/start-docker.sh clean
+
+# 查看狀態與日誌
+./deploy/scripts/start-docker.sh status
+./deploy/scripts/start-docker.sh logs
+./deploy/scripts/start-docker.sh logs gateway
+```
+
+**架構圖：**
+
+```mermaid
+flowchart TB
+    subgraph Docker["Docker Network: rbac-network"]
+        LDAP[(OpenLDAP<br/>:389)]
+        PG[(PostgreSQL<br/>:5432)]
+        KC[Keycloak<br/>:8180]
+        PHPADMIN[phpLDAPadmin<br/>:8181]
+        GW[Gateway<br/>:8080]
+        US[User Service<br/>:8081]
+        PS[Product Service<br/>:8082]
+    end
+
+    GW --> US
+    GW --> PS
+    GW --> KC
+    US --> KC
+    PS --> KC
+    KC --> LDAP
+    KC --> PG
+```
+
+### 11.4 Kubernetes 環境 (start-k8s.sh)
+
+使用 Kind 建立本地 K8s Cluster，所有服務在 K8s 中運行。
+
+```bash
+# 建立 cluster 並部署服務
+./deploy/scripts/start-k8s.sh start
+
+# 查看狀態
+./deploy/scripts/start-k8s.sh status
+
+# 停止服務 (保留 cluster)
+./deploy/scripts/start-k8s.sh stop
+
+# 刪除整個 cluster
+./deploy/scripts/start-k8s.sh delete
+
+# 查看服務日誌
+./deploy/scripts/start-k8s.sh logs           # 列出可用服務
+./deploy/scripts/start-k8s.sh logs keycloak  # 特定服務日誌
+
+# Port Forwarding
+./deploy/scripts/start-k8s.sh port-forward
+```
+
+**架構圖：**
+
+```mermaid
+flowchart TB
+    subgraph Kind["Kind Cluster: rbac-sso-poc"]
+        subgraph NS["Namespace: rbac-sso"]
+            PG[(PostgreSQL<br/>StatefulSet)]
+            LDAP[(OpenLDAP<br/>Deployment)]
+            KC[Keycloak<br/>NodePort:30180]
+        end
+    end
+
+    Host[localhost] -->|:8180| KC
+    KC --> PG
+    KC --> LDAP
+```
+
+### 11.5 壓力測試 (load-test.sh)
+
+對 API 進行簡易壓力測試，支援 curl、hey、ab 三種工具。
+
+```bash
+# 執行預設測試套件
+./deploy/scripts/load-test.sh test
+
+# 測試特定端點
+./deploy/scripts/load-test.sh endpoint /api/products
+./deploy/scripts/load-test.sh endpoint /actuator/health
+
+# 調整測試參數
+./deploy/scripts/load-test.sh -c 50 -n 1000 test    # 50 並發，1000 請求
+./deploy/scripts/load-test.sh -d 60 --tool hey test # 使用 hey，持續 60 秒
+
+# 指定服務 URL
+./deploy/scripts/load-test.sh -g http://localhost:8080 -k http://localhost:8180 test
+```
+
+**參數說明：**
+
+| 參數 | 說明 | 預設值 |
+|------|------|--------|
+| `-c, --concurrent` | 並發連線數 | 10 |
+| `-n, --requests` | 總請求數 | 100 |
+| `-d, --duration` | 測試持續時間 (秒) | 30 |
+| `-g, --gateway` | Gateway URL | http://localhost:8080 |
+| `-k, --keycloak` | Keycloak URL | http://localhost:8180 |
+| `--tool` | 壓測工具 (curl/hey/ab) | curl |
+
+**測試套件內容：**
+
+1. Health Check (`/actuator/health`)
+2. 產品列表查詢 (`/api/products`)
+3. 使用者查詢 (`/api/users`)
+4. Token 端點測試
+
+**環境變數：**
+
+```bash
+export KEYCLOAK_URL=http://localhost:8180
+export GATEWAY_URL=http://localhost:8080
+export CLIENT_ID=ecommerce-api
+export USERNAME=admin.user
+export PASSWORD=admin123
+```
+
+### 11.6 使用流程
+
+```mermaid
+flowchart TD
+    A[選擇開發模式] --> B{需求?}
+
+    B -->|開發除錯| C[start-local.sh]
+    B -->|整合測試| D[start-docker.sh]
+    B -->|K8s 測試| E[start-k8s.sh]
+
+    C --> F[編輯程式碼]
+    F --> G[熱重載 / 重啟服務]
+
+    D --> H[執行測試]
+    E --> H
+
+    H --> I[load-test.sh 壓測]
+    I --> J{通過?}
+
+    J -->|是| K[提交程式碼]
+    J -->|否| F
+```
