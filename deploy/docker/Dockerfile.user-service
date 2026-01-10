@@ -1,0 +1,20 @@
+# User Service Dockerfile
+FROM eclipse-temurin:17-jre-jammy
+
+LABEL maintainer="RBAC-SSO-POC Team"
+LABEL description="User Service"
+
+# Create data directory
+RUN mkdir -p /data
+
+WORKDIR /app
+
+# Copy the JAR file
+COPY services/user-service/build/libs/user-service-1.0.0-SNAPSHOT.jar app.jar
+
+# JVM options for containers
+ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/./urandom"
+
+EXPOSE 8082
+
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

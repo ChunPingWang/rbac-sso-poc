@@ -750,6 +750,98 @@ docker compose -f deploy/docker/docker-compose.yml up -d
 
 ---
 
+## Docker 整合測試
+
+本專案提供完整的 Docker 整合測試，驗證所有服務在容器環境中正常運作。
+
+### 測試項目
+
+| 測試類別 | 測試項目 | 說明 |
+|----------|----------|------|
+| 容器狀態 | 6 個服務 | 驗證所有 Docker 容器運行中 |
+| 健康檢查 | 4 個端點 | Gateway, Product, User, Keycloak |
+| 基礎設施 | LDAP, PostgreSQL | 驗證資料庫連接 |
+| API 認證 | 401 回應 | 未認證請求正確拒絕 |
+| 路由 | Gateway | 驗證 API Gateway 路由 |
+
+### 執行整合測試
+
+```bash
+# 方法 1: 使用整合測試腳本 (推薦)
+./deploy/scripts/integration-test.sh
+
+# 方法 2: 手動啟動並測試
+# 1. 啟動所有服務
+docker compose -f deploy/docker/docker-compose.yml up -d
+
+# 2. 等待服務就緒 (約 60-90 秒)
+# 3. 驗證服務健康狀態
+curl http://localhost:8080/actuator/health  # Gateway
+curl http://localhost:8081/actuator/health  # Product Service
+curl http://localhost:8082/actuator/health  # User Service
+curl http://localhost:8180/health/ready     # Keycloak
+```
+
+### 測試輸出範例
+
+```
+╔═══════════════════════════════════════════════════════════════╗
+║         RBAC-SSO-POC Integration Test Suite                   ║
+╚═══════════════════════════════════════════════════════════════╝
+
+[INFO] 開始整合測試...
+
+==========================================
+執行測試用例
+==========================================
+
+[TEST] Docker 容器狀態測試
+[PASS] rbac-openldap 運行中
+[PASS] rbac-postgres 運行中
+[PASS] rbac-keycloak 運行中
+[PASS] rbac-gateway 運行中
+[PASS] rbac-product-service 運行中
+[PASS] rbac-user-service 運行中
+
+[TEST] 服務健康檢查
+[PASS] Gateway 健康檢查通過
+[PASS] Product Service 健康檢查通過
+[PASS] User Service 健康檢查通過
+[PASS] Keycloak 健康檢查通過
+
+==========================================
+測試結果總結
+==========================================
+通過: 16
+失敗: 0
+
+✓ 所有測試通過！
+```
+
+### 服務端口對照
+
+| 服務 | 端口 | 說明 |
+|------|------|------|
+| Gateway | 8080 | API 閘道 |
+| Product Service | 8081 | 商品管理服務 |
+| User Service | 8082 | 使用者服務 |
+| Keycloak | 8180 | SSO/OAuth2 認證 |
+| phpLDAPadmin | 8181 | LDAP 管理介面 |
+| PostgreSQL | 5432 | Keycloak 資料庫 |
+| OpenLDAP | 389/636 | 使用者目錄 |
+
+### 停止與清理
+
+```bash
+# 停止所有服務
+docker compose -f deploy/docker/docker-compose.yml down
+
+# 停止並清理 volumes (包含資料)
+docker compose -f deploy/docker/docker-compose.yml down -v
+```
+
+---
+
 ## 專案結構
 
 ```
