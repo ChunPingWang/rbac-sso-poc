@@ -1171,6 +1171,15 @@
 - [ ] 寫入吞吐量達標（100-500 events/second）
 - [ ] 擷取延遲 < 50ms（正常負載）
 - [ ] 查詢效能達標（百萬筆記錄 5 秒內回應）
+- [ ] 契約測試 (Contract Testing) 通過，確保 API 相容性
+
+### 8.5 契約測試驗收 (Consumer-Driven Contract)
+
+- [ ] 使用 Spring Cloud Contract 定義 API 契約
+- [ ] Provider 端自動產生並執行契約測試
+- [ ] 產生 Stubs JAR 供 Consumer 端使用
+- [ ] 契約涵蓋所有公開 API 端點（查詢、錯誤處理）
+- [ ] 契約測試整合至 CI/CD 流程
 
 ---
 

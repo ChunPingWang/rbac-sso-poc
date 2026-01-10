@@ -28,6 +28,7 @@
 | Audit | audit-lib (Shared) | 1.0.x |
 | Metrics | Micrometer | 1.12.x |
 | Architecture Test | ArchUnit | 1.2.x |
+| Contract Test | Spring Cloud Contract | 4.1.x |
 | Container | Docker | 24.x |
 | Orchestration | Kubernetes | 1.28+ |
 
@@ -851,6 +852,145 @@ class ArchitectureTest {
             .that().resideInAPackage("..domain.model.valueobject..")
             .should().haveModifier(JavaModifier.FINAL)
             .check(classes);
+    }
+}
+```
+
+### 6.2 契約測試 (Spring Cloud Contract)
+
+採用 Consumer-Driven Contract (CDC) 模式，確保 API 相容性：
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                     Spring Cloud Contract Workflow                               │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  Provider (audit-lib)                    Consumer (微服務)                       │
+│  ══════════════════                      ═══════════════                         │
+│                                                                                  │
+│  1. 定義契約 (Groovy DSL)                                                        │
+│     src/test/resources/contracts/                                                │
+│     └── auditquery/                                                              │
+│         ├── shouldReturnAuditLogById.groovy                                      │
+│         ├── shouldReturnAuditLogsByUsername.groovy                               │
+│         └── ...                                                                  │
+│                                                                                  │
+│  2. 執行 contractTest                    3. 使用 Stubs JAR                       │
+│     ./gradlew contractTest                  testImplementation                   │
+│         │                                   'com.example:audit-lib:stubs'        │
+│         ▼                                       │                                │
+│     ┌─────────────────┐                         ▼                                │
+│     │ 自動產生測試    │                   ┌─────────────────┐                    │
+│     │ AuditqueryTest  │                   │ WireMock Stub   │                    │
+│     │ (6 tests)       │                   │ Server          │                    │
+│     └─────────────────┘                   └─────────────────┘                    │
+│                                                                                  │
+│  4. 發布 Stubs JAR                                                               │
+│     ./gradlew publishStubsPublicationToMavenLocal                                │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 契約定義範例
+
+```groovy
+// src/test/resources/contracts/auditquery/shouldReturnAuditLogById.groovy
+Contract.make {
+    name "should return audit log by ID"
+    description "Returns a single audit log entry by its unique ID"
+
+    request {
+        method GET()
+        url "/api/v1/audit-logs/550e8400-e29b-41d4-a716-446655440000"
+        headers {
+            contentType applicationJson()
+        }
+    }
+
+    response {
+        status OK()
+        headers {
+            contentType applicationJson()
+        }
+        body([
+            id: "550e8400-e29b-41d4-a716-446655440000",
+            eventType: "PRODUCT_CREATED",
+            aggregateType: "Product",
+            username: "admin@example.com",
+            result: "SUCCESS"
+        ])
+        bodyMatchers {
+            jsonPath('$.id', byRegex('[a-f0-9-]{36}'))
+            jsonPath('$.timestamp', byRegex('[0-9]{4}-[0-9]{2}-[0-9]{2}T.*'))
+        }
+    }
+}
+```
+
+#### BaseContractTest
+
+```java
+// src/test/java/com/example/audit/contract/BaseContractTest.java
+public abstract class BaseContractTest {
+
+    private AuditQueryService queryService;
+
+    @BeforeEach
+    public void setup() {
+        queryService = mock(AuditQueryService.class);
+        setupMockResponses();
+
+        // 配置 Jackson ObjectMapper
+        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JavaTimeModule());
+        objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+        AuditQueryController controller = new AuditQueryController(queryService);
+        RestAssuredMockMvc.standaloneSetup(
+            MockMvcBuilders.standaloneSetup(controller)
+                .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
+        );
+    }
+
+    private void setupMockResponses() {
+        // Mock 回傳值設定...
+    }
+}
+```
+
+#### Gradle 配置
+
+```groovy
+// libs/audit-lib/build.gradle
+plugins {
+    id 'org.springframework.cloud.contract' version '4.1.4'
+    id 'maven-publish'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:2023.0.3"
+    }
+}
+
+dependencies {
+    testImplementation 'org.springframework.cloud:spring-cloud-starter-contract-verifier'
+    testImplementation 'org.springframework.cloud:spring-cloud-contract-wiremock'
+}
+
+contracts {
+    testFramework = TestFramework.JUNIT5
+    baseClassForTests = 'com.example.audit.contract.BaseContractTest'
+    contractsDslDir = file("src/test/resources/contracts")
+}
+
+publishing {
+    publications {
+        stubs(MavenPublication) {
+            artifact verifierStubsJar
+            artifactId = "${project.name}"
+            version = "${project.version}-stubs"
+        }
     }
 }
 ```

@@ -2,6 +2,8 @@ plugins {
     id 'java-library'
     id 'org.springframework.boot' version '3.3.5' apply false
     id 'io.spring.dependency-management' version '1.1.6'
+    id 'org.springframework.cloud.contract' version '4.1.4'
+    id 'maven-publish'
 }
 
 group = 'com.example'
@@ -19,6 +21,7 @@ repositories {
 dependencyManagement {
     imports {
         mavenBom org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:2023.0.3"
     }
 }
 
@@ -60,8 +63,34 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-web'
     testImplementation 'org.springframework.security:spring-security-test'
     testImplementation 'com.tngtech.archunit:archunit-junit5:1.2.1'
+
+    // Spring Cloud Contract
+    testImplementation 'org.springframework.cloud:spring-cloud-starter-contract-verifier'
+    testImplementation 'org.springframework.cloud:spring-cloud-contract-wiremock'
+}
+
+// Spring Cloud Contract configuration
+contracts {
+    testFramework = org.springframework.cloud.contract.verifier.config.TestFramework.JUNIT5
+    baseClassForTests = 'com.example.audit.contract.BaseContractTest'
+    contractsDslDir = file("src/test/resources/contracts")
+}
+
+// Contract test task configuration
+contractTest {
+    useJUnitPlatform()
 }
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+// Publishing stubs for consumers
+publishing {
+    publications {
+        stubs(MavenPublication) {
+            artifactId = "${project.name}"
+            artifact verifierStubsJar
+        }
+    }
 }
