@@ -842,6 +842,145 @@ docker compose -f deploy/docker/docker-compose.yml down -v
 
 ---
 
+## Kubernetes 整合測試
+
+本專案支援在 Kind (Kubernetes in Docker) 環境中進行整合測試。
+
+### 前置需求
+
+- [Kind](https://kind.sigs.k8s.io/) - Kubernetes in Docker
+- [kubectl](https://kubernetes.io/docs/tasks/tools/) - Kubernetes CLI
+- Docker
+
+### K8s 測試項目
+
+| 測試類別 | 測試項目 | 數量 |
+|----------|----------|:----:|
+| Cluster | Kind cluster 存在檢查 | 1 |
+| Namespace | rbac-sso namespace 檢查 | 1 |
+| Config | ConfigMap 和 Secret 檢查 | 2 |
+| PVC | PersistentVolumeClaim 狀態 | 3 |
+| Pod 狀態 | 6 個服務 Pod 運行狀態 | 6 |
+| Pod Ready | 6 個服務 Pod 就緒狀態 | 6 |
+| Service | 6 個 ClusterIP Service | 6 |
+| NodePort | 4 個 NodePort Service | 4 |
+| 健康檢查 | HTTP 端點檢查 | 4 |
+| API 認證 | 401 回應驗證 | 2 |
+| Keycloak | Admin Console 可訪問 | 1 |
+| **總計** | | **36** |
+
+### 執行 K8s 整合測試
+
+```bash
+# 方法 1: 完整部署 (含建置 Docker images)
+./deploy/scripts/k8s-deploy.sh --build
+
+# 方法 2: 僅部署 (已有 Docker images)
+./deploy/scripts/k8s-deploy.sh
+
+# 執行整合測試
+./deploy/scripts/k8s-integration-test.sh
+```
+
+### K8s 部署架構
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Kind Cluster (rbac-sso)                  │
+├─────────────────────────────────────────────────────────────┤
+│  Namespace: rbac-sso                                        │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │  Infrastructure                                       │  │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────────┐  │  │
+│  │  │  OpenLDAP   │ │ PostgreSQL  │ │    Keycloak     │  │  │
+│  │  │   :389      │ │   :5432     │ │     :8080       │  │  │
+│  │  └─────────────┘ └─────────────┘ └─────────────────┘  │  │
+│  └───────────────────────────────────────────────────────┘  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │  Application Services                                 │  │
+│  │  ┌─────────────┐ ┌───────────────┐ ┌──────────────┐   │  │
+│  │  │   Gateway   │ │Product Service│ │ User Service │   │  │
+│  │  │    :8080    │ │     :8081     │ │    :8082     │   │  │
+│  │  └─────────────┘ └───────────────┘ └──────────────┘   │  │
+│  └───────────────────────────────────────────────────────┘  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │  NodePort Services (外部存取)                         │  │
+│  │  Gateway:30080 Product:30081 User:30082 KC:30180      │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### K8s 測試輸出範例
+
+```
+╔═══════════════════════════════════════════════════════════════╗
+║     RBAC-SSO-POC Kubernetes Integration Test Suite            ║
+╚═══════════════════════════════════════════════════════════════╝
+
+[INFO] 開始 Kubernetes 整合測試...
+
+==========================================
+執行測試用例
+==========================================
+
+[TEST] Namespace 檢查
+[PASS] Namespace 'rbac-sso' 存在
+
+[TEST] Pod 狀態檢查
+[PASS] openldap Pod 運行中
+[PASS] postgres Pod 運行中
+[PASS] keycloak Pod 運行中
+[PASS] gateway Pod 運行中
+[PASS] product-service Pod 運行中
+[PASS] user-service Pod 運行中
+
+[TEST] 服務健康檢查 (HTTP)
+[PASS] Gateway 健康檢查通過
+[PASS] Product Service 健康檢查通過
+[PASS] User Service 健康檢查通過
+[PASS] Keycloak 健康檢查通過
+
+==========================================
+測試結果總結
+==========================================
+通過: 36
+失敗: 0
+
+✓ 所有測試通過！
+```
+
+### K8s 服務端口對照
+
+| 服務 | ClusterIP 端口 | NodePort | 本機存取 |
+|------|:--------------:|:--------:|----------|
+| Gateway | 8080 | 30080 | http://localhost:8080 |
+| Product Service | 8081 | 30081 | http://localhost:8081 |
+| User Service | 8082 | 30082 | http://localhost:8082 |
+| Keycloak | 8080 | 30180 | http://localhost:8180 |
+| OpenLDAP | 389 | 30389 | localhost:389 |
+| PostgreSQL | 5432 | - | 內部存取 |
+
+### K8s 常用指令
+
+```bash
+# 查看所有資源
+kubectl get all -n rbac-sso
+
+# 查看 Pod 日誌
+kubectl logs -n rbac-sso -l app=gateway
+kubectl logs -n rbac-sso -l app=product-service
+
+# 進入 Pod 容器
+kubectl exec -it -n rbac-sso deploy/gateway -- sh
+
+# 刪除 Kind cluster
+./deploy/scripts/k8s-deploy.sh --delete
+# 或
+kind delete cluster --name rbac-sso
+```
+
+---
+
 ## 專案結構
 
 ```

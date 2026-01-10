@@ -1,0 +1,8 @@
+# Kubernetes Namespace for RBAC-SSO-POC
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rbac-sso
+  labels:
+    app.kubernetes.io/name: rbac-sso-poc
+    app.kubernetes.io/part-of: ecommerce-platform

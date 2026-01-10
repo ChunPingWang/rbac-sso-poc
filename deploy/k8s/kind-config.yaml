@@ -1,0 +1,34 @@
+# Kind cluster configuration for RBAC-SSO-POC
+# Usage: kind create cluster --config deploy/k8s/kind-config.yaml --name rbac-sso
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: rbac-sso
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # Gateway Service
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      # Product Service
+      - containerPort: 30081
+        hostPort: 8081
+        protocol: TCP
+      # User Service
+      - containerPort: 30082
+        hostPort: 8082
+        protocol: TCP
+      # Keycloak
+      - containerPort: 30180
+        hostPort: 8180
+        protocol: TCP
+      # OpenLDAP
+      - containerPort: 30389
+        hostPort: 389
+        protocol: TCP
