@@ -1,81 +1,116 @@
-# infra/ldap/bootstrap.ldif
-# LDAP 初始資料 - E-Commerce RBAC-SSO POC
+# ============================================
+# LDAP Bootstrap Data for RBAC SSO POC
+# ============================================
 
-# Organizational Units
-dn: ou=users,dc=ecommerce,dc=local
+# Organization Units
+dn: ou=users,dc=example,dc=com
 objectClass: organizationalUnit
 ou: users
 
-dn: ou=groups,dc=ecommerce,dc=local
+dn: ou=groups,dc=example,dc=com
 objectClass: organizationalUnit
 ou: groups
 
-dn: ou=services,dc=ecommerce,dc=local
-objectClass: organizationalUnit
-ou: services
-
-# Service Account for Keycloak
-dn: cn=keycloak,ou=services,dc=ecommerce,dc=local
-objectClass: organizationalRole
-objectClass: simpleSecurityObject
-cn: keycloak
-userPassword: keycloak123
+# ============================================
+# Users
+# ============================================
 
 # Admin User
-dn: uid=admin.user,ou=users,dc=ecommerce,dc=local
+dn: uid=admin,ou=users,dc=example,dc=com
 objectClass: inetOrgPerson
 objectClass: posixAccount
 objectClass: shadowAccount
-uid: admin.user
-sn: User
-givenName: Admin
-cn: Admin User
-uidNumber: 10001
-gidNumber: 10001
-userPassword: admin123
-homeDirectory: /home/admin.user
-mail: admin@ecommerce.local
-telephoneNumber: +886-2-1234-5678
+uid: admin
+sn: Administrator
+givenName: System
+cn: System Administrator
+displayName: System Administrator
+uidNumber: 1000
+gidNumber: 1000
+userPassword: admin_password
+homeDirectory: /home/admin
+mail: admin@example.com
+employeeType: ADMIN
 
-# Normal User
-dn: uid=normal.user,ou=users,dc=ecommerce,dc=local
+# Manager User
+dn: uid=manager,ou=users,dc=example,dc=com
 objectClass: inetOrgPerson
 objectClass: posixAccount
 objectClass: shadowAccount
-uid: normal.user
-sn: User
-givenName: Normal
-cn: Normal User
-uidNumber: 10002
-gidNumber: 10002
-userPassword: user123
-homeDirectory: /home/normal.user
-mail: user@ecommerce.local
+uid: manager
+sn: Manager
+givenName: Project
+cn: Project Manager
+displayName: Project Manager
+uidNumber: 1001
+gidNumber: 1001
+userPassword: manager_password
+homeDirectory: /home/manager
+mail: manager@example.com
+employeeType: MANAGER
 
-# Test User
-dn: uid=test.user,ou=users,dc=ecommerce,dc=local
+# Regular User
+dn: uid=user,ou=users,dc=example,dc=com
 objectClass: inetOrgPerson
 objectClass: posixAccount
 objectClass: shadowAccount
-uid: test.user
+uid: user
 sn: User
-givenName: Test
-cn: Test User
-uidNumber: 10003
-gidNumber: 10003
-userPassword: test123
-homeDirectory: /home/test.user
-mail: test@ecommerce.local
+givenName: Regular
+cn: Regular User
+displayName: Regular User
+uidNumber: 1002
+gidNumber: 1002
+userPassword: user_password
+homeDirectory: /home/user
+mail: user@example.com
+employeeType: USER
 
-# Groups
-dn: cn=admins,ou=groups,dc=ecommerce,dc=local
+# Viewer User
+dn: uid=viewer,ou=users,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: viewer
+sn: Viewer
+givenName: Read Only
+cn: Read Only Viewer
+displayName: Read Only Viewer
+uidNumber: 1003
+gidNumber: 1003
+userPassword: viewer_password
+homeDirectory: /home/viewer
+mail: viewer@example.com
+employeeType: VIEWER
+
+# ============================================
+# Groups (Roles)
+# ============================================
+
+# Admin Group
+dn: cn=admin,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
-cn: admins
-member: uid=admin.user,ou=users,dc=ecommerce,dc=local
+cn: admin
+description: Administrator group with full access
+member: uid=admin,ou=users,dc=example,dc=com
 
-dn: cn=users,ou=groups,dc=ecommerce,dc=local
+# Manager Group
+dn: cn=manager,ou=groups,dc=example,dc=com
 objectClass: groupOfNames
-cn: users
-member: uid=admin.user,ou=users,dc=ecommerce,dc=local
-member: uid=normal.user,ou=users,dc=ecommerce,dc=local
-member: uid=test.user,ou=users,dc=ecommerce,dc=local
+cn: manager
+description: Manager group with elevated access
+member: uid=manager,ou=users,dc=example,dc=com
+
+# User Group
+dn: cn=user,ou=groups,dc=example,dc=com
+objectClass: groupOfNames
+cn: user
+description: Regular user group with standard access
+member: uid=user,ou=users,dc=example,dc=com
+
+# Viewer Group
+dn: cn=viewer,ou=groups,dc=example,dc=com
+objectClass: groupOfNames
+cn: viewer
+description: Viewer group with read-only access
+member: uid=viewer,ou=users,dc=example,dc=com

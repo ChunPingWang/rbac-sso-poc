@@ -1,3 +1,4 @@
 rootProject.name = 'rbac-sso-poc'
 
 include 'libs:audit-lib'
+include 'apps:rbac-demo'
