@@ -1,0 +1,339 @@
+{
+  "id": "rbac-sso-realm",
+  "realm": "rbac-sso-realm",
+  "displayName": "RBAC SSO POC Realm",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+  "roles": {
+    "realm": [
+      {
+        "name": "ROLE_ADMIN",
+        "description": "Administrator role with full access",
+        "composite": false
+      },
+      {
+        "name": "ROLE_MANAGER",
+        "description": "Manager role with elevated access",
+        "composite": false
+      },
+      {
+        "name": "ROLE_USER",
+        "description": "Regular user role with standard access",
+        "composite": false
+      },
+      {
+        "name": "ROLE_VIEWER",
+        "description": "Viewer role with read-only access",
+        "composite": false
+      }
+    ],
+    "client": {
+      "rbac-sso-client": [
+        {
+          "name": "admin",
+          "description": "Admin client role"
+        },
+        {
+          "name": "manager",
+          "description": "Manager client role"
+        },
+        {
+          "name": "user",
+          "description": "User client role"
+        },
+        {
+          "name": "viewer",
+          "description": "Viewer client role"
+        }
+      ]
+    }
+  },
+  "groups": [
+    {
+      "name": "Administrators",
+      "path": "/Administrators",
+      "realmRoles": ["ROLE_ADMIN"]
+    },
+    {
+      "name": "Managers",
+      "path": "/Managers",
+      "realmRoles": ["ROLE_MANAGER"]
+    },
+    {
+      "name": "Users",
+      "path": "/Users",
+      "realmRoles": ["ROLE_USER"]
+    },
+    {
+      "name": "Viewers",
+      "path": "/Viewers",
+      "realmRoles": ["ROLE_VIEWER"]
+    }
+  ],
+  "defaultDefaultClientScopes": [
+    "web-origins",
+    "acr",
+    "profile",
+    "roles",
+    "email"
+  ],
+  "clients": [
+    {
+      "clientId": "rbac-sso-client",
+      "name": "RBAC SSO Application",
+      "description": "Spring Boot application client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "rbac-sso-client-secret",
+      "redirectUris": [
+        "http://localhost:8082/*",
+        "http://localhost:8082/login/oauth2/code/keycloak"
+      ],
+      "webOrigins": [
+        "http://localhost:8082"
+      ],
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "frontchannelLogout": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "post.logout.redirect.uris": "http://localhost:8082/*",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "backchannel.logout.session.required": "true",
+        "backchannel.logout.revoke.offline.tokens": "false"
+      },
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ],
+      "protocolMappers": [
+        {
+          "name": "realm-roles-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_roles",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "groups-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "groups",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "username-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "username",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "components": {
+    "org.keycloak.storage.UserStorageProvider": [
+      {
+        "name": "ldap",
+        "providerId": "ldap",
+        "subComponents": {
+          "org.keycloak.storage.ldap.mappers.LDAPStorageMapper": [
+            {
+              "name": "username",
+              "providerId": "user-attribute-ldap-mapper",
+              "subComponents": {},
+              "config": {
+                "ldap.attribute": ["uid"],
+                "is.mandatory.in.ldap": ["true"],
+                "read.only": ["false"],
+                "always.read.value.from.ldap": ["false"],
+                "user.model.attribute": ["username"]
+              }
+            },
+            {
+              "name": "email",
+              "providerId": "user-attribute-ldap-mapper",
+              "subComponents": {},
+              "config": {
+                "ldap.attribute": ["mail"],
+                "is.mandatory.in.ldap": ["false"],
+                "read.only": ["false"],
+                "always.read.value.from.ldap": ["false"],
+                "user.model.attribute": ["email"]
+              }
+            },
+            {
+              "name": "first name",
+              "providerId": "user-attribute-ldap-mapper",
+              "subComponents": {},
+              "config": {
+                "ldap.attribute": ["givenName"],
+                "is.mandatory.in.ldap": ["true"],
+                "read.only": ["false"],
+                "always.read.value.from.ldap": ["false"],
+                "user.model.attribute": ["firstName"]
+              }
+            },
+            {
+              "name": "last name",
+              "providerId": "user-attribute-ldap-mapper",
+              "subComponents": {},
+              "config": {
+                "ldap.attribute": ["sn"],
+                "is.mandatory.in.ldap": ["true"],
+                "read.only": ["false"],
+                "always.read.value.from.ldap": ["false"],
+                "user.model.attribute": ["lastName"]
+              }
+            },
+            {
+              "name": "group-ldap-mapper",
+              "providerId": "group-ldap-mapper",
+              "subComponents": {},
+              "config": {
+                "groups.dn": ["ou=groups,dc=example,dc=com"],
+                "group.name.ldap.attribute": ["cn"],
+                "group.object.classes": ["groupOfNames"],
+                "preserve.group.inheritance": ["false"],
+                "membership.ldap.attribute": ["member"],
+                "membership.attribute.type": ["DN"],
+                "membership.user.ldap.attribute": ["uid"],
+                "groups.ldap.filter": [],
+                "mode": ["LDAP_ONLY"],
+                "user.roles.retrieve.strategy": ["LOAD_GROUPS_BY_MEMBER_ATTRIBUTE"],
+                "memberof.ldap.attribute": ["memberOf"],
+                "ignore.missing.groups": ["false"],
+                "drop.non.existing.groups.during.sync": ["false"]
+              }
+            }
+          ]
+        },
+        "config": {
+          "enabled": ["true"],
+          "priority": ["0"],
+          "fullSyncPeriod": ["-1"],
+          "changedSyncPeriod": ["-1"],
+          "cachePolicy": ["DEFAULT"],
+          "evictionDay": [],
+          "evictionHour": [],
+          "evictionMinute": [],
+          "maxLifespan": [],
+          "batchSizeForSync": ["1000"],
+          "editMode": ["READ_ONLY"],
+          "importEnabled": ["true"],
+          "syncRegistrations": ["false"],
+          "vendor": ["other"],
+          "usernameLDAPAttribute": ["uid"],
+          "rdnLDAPAttribute": ["uid"],
+          "uuidLDAPAttribute": ["entryUUID"],
+          "userObjectClasses": ["inetOrgPerson, posixAccount"],
+          "connectionUrl": ["ldap://openldap:389"],
+          "usersDn": ["ou=users,dc=example,dc=com"],
+          "authType": ["simple"],
+          "bindDn": ["cn=admin,dc=example,dc=com"],
+          "bindCredential": ["admin_password"],
+          "searchScope": ["1"],
+          "validatePasswordPolicy": ["false"],
+          "trustEmail": ["false"],
+          "useTruststoreSpi": ["ldapsOnly"],
+          "connectionPooling": ["true"],
+          "connectionPoolingAuthentication": [],
+          "connectionPoolingDebug": [],
+          "connectionPoolingInitSize": [],
+          "connectionPoolingMaxSize": [],
+          "connectionPoolingPrefSize": [],
+          "connectionPoolingProtocol": [],
+          "connectionPoolingTimeout": [],
+          "connectionTimeout": [],
+          "readTimeout": [],
+          "pagination": ["true"],
+          "allowKerberosAuthentication": ["false"],
+          "serverPrincipal": [],
+          "keyTab": [],
+          "kerberosRealm": [],
+          "debug": ["false"],
+          "useKerberosForPasswordAuthentication": ["false"]
+        }
+      }
+    ]
+  },
+  "browserSecurityHeaders": {
+    "contentSecurityPolicyReportOnly": "",
+    "xContentTypeOptions": "nosniff",
+    "xRobotsTag": "none",
+    "xFrameOptions": "SAMEORIGIN",
+    "contentSecurityPolicy": "frame-src 'self'; frame-ancestors 'self'; object-src 'none';",
+    "xXSSProtection": "1; mode=block",
+    "strictTransportSecurity": "max-age=31536000; includeSubDomains"
+  },
+  "smtpServer": {},
+  "eventsEnabled": true,
+  "eventsListeners": [
+    "jboss-logging"
+  ],
+  "enabledEventTypes": [
+    "LOGIN",
+    "LOGIN_ERROR",
+    "LOGOUT",
+    "LOGOUT_ERROR",
+    "REGISTER",
+    "REGISTER_ERROR"
+  ],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
+  "internationalizationEnabled": false,
+  "supportedLocales": [],
+  "browserFlow": "browser",
+  "registrationFlow": "registration",
+  "directGrantFlow": "direct grant",
+  "resetCredentialsFlow": "reset credentials",
+  "clientAuthenticationFlow": "clients"
+}
