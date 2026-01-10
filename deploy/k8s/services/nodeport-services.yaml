@@ -1,0 +1,86 @@
+# NodePort Services for external access in Kind
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-nodeport
+  namespace: rbac-sso
+  labels:
+    app: gateway
+spec:
+  type: NodePort
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080
+      name: http
+  selector:
+    app: gateway
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-service-nodeport
+  namespace: rbac-sso
+  labels:
+    app: product-service
+spec:
+  type: NodePort
+  ports:
+    - port: 8081
+      targetPort: 8081
+      nodePort: 30081
+      name: http
+  selector:
+    app: product-service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service-nodeport
+  namespace: rbac-sso
+  labels:
+    app: user-service
+spec:
+  type: NodePort
+  ports:
+    - port: 8082
+      targetPort: 8082
+      nodePort: 30082
+      name: http
+  selector:
+    app: user-service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-nodeport
+  namespace: rbac-sso
+  labels:
+    app: keycloak
+spec:
+  type: NodePort
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30180
+      name: http
+  selector:
+    app: keycloak
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openldap-nodeport
+  namespace: rbac-sso
+  labels:
+    app: openldap
+spec:
+  type: NodePort
+  ports:
+    - port: 389
+      targetPort: 389
+      nodePort: 30389
+      name: ldap
+  selector:
+    app: openldap

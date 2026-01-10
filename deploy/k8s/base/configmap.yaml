@@ -1,0 +1,22 @@
+# ConfigMap for shared configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rbac-config
+  namespace: rbac-sso
+  labels:
+    app.kubernetes.io/name: rbac-sso-poc
+data:
+  # Keycloak Configuration
+  KEYCLOAK_ISSUER_URI: "http://keycloak:8080/realms/ecommerce"
+
+  # LDAP Configuration
+  LDAP_DOMAIN: "ecommerce.local"
+  LDAP_BASE_DN: "dc=ecommerce,dc=local"
+
+  # Service URLs (internal)
+  USER_SERVICE_URL: "http://user-service:8082"
+  PRODUCT_SERVICE_URL: "http://product-service:8081"
+
+  # Spring Profiles
+  SPRING_PROFILES_ACTIVE: "k8s"
