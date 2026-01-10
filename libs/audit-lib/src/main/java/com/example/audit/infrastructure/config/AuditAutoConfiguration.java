@@ -1,9 +1,13 @@
 package com.example.audit.infrastructure.config;
 
 import com.example.audit.application.service.AuditQueryService;
+import com.example.audit.application.event.AuditEventBuilder;
+import com.example.audit.domain.port.AuditEventPublisher;
 import com.example.audit.domain.port.AuditLogRepository;
 import com.example.audit.infrastructure.aspect.AuditAspect;
 import com.example.audit.infrastructure.context.AuditContextHolder;
+import com.example.audit.infrastructure.event.AuditDomainEventListener;
+import com.example.audit.infrastructure.event.SpringAuditEventPublisher;
 import com.example.audit.infrastructure.health.AuditHealthIndicator;
 import com.example.audit.infrastructure.metrics.AuditMetrics;
 import com.example.audit.infrastructure.persistence.JpaAuditLogRepository;
@@ -25,9 +29,11 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.scheduling.annotation.EnableAsync;
 
 import java.util.List;
 
@@ -48,9 +54,16 @@ import java.util.List;
  * Spring Boot Actuator's /actuator/refresh endpoint. When AuditProperties
  * is annotated with @RefreshScope, configuration changes will be picked up
  * at runtime without restart.</p>
+ *
+ * <p>This configuration supports two audit mechanisms:</p>
+ * <ul>
+ *   <li><b>AOP-based (legacy):</b> Use @Auditable annotation on methods</li>
+ *   <li><b>Domain Event-based (recommended):</b> Publish AuditableDomainEvent through AuditEventPublisher</li>
+ * </ul>
  */
 @AutoConfiguration
 @EnableAspectJAutoProxy
+@EnableAsync
 @ConfigurationPropertiesScan(basePackages = "com.example.audit.infrastructure.config")
 @ConditionalOnProperty(name = "audit.enabled", havingValue = "true", matchIfMissing = true)
 @EnableJpaRepositories(basePackages = "com.example.audit.infrastructure.persistence")
@@ -146,5 +159,39 @@ public class AuditAutoConfiguration {
     @ConditionalOnMissingBean
     public AuditQueryController auditQueryController(AuditQueryService queryService) {
         return new AuditQueryController(queryService);
+    }
+
+    // ========== Domain Event based audit beans ==========
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AuditEventPublisher auditEventPublisher(
+            ApplicationEventPublisher applicationEventPublisher,
+            AuditProperties properties) {
+        return new SpringAuditEventPublisher(applicationEventPublisher, properties);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AuditDomainEventListener auditDomainEventListener(
+            AuditLogRepository repository,
+            PayloadProcessor payloadProcessor,
+            AuditMetrics metrics) {
+        return new AuditDomainEventListener(repository, payloadProcessor, metrics);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AuditEventBuilder auditEventBuilder(
+            AuditContextHolder contextHolder,
+            AuditProperties properties,
+            ObjectMapper objectMapper) {
+
+        // Set default service name if not configured
+        if (properties.getServiceName() == null || properties.getServiceName().isBlank()) {
+            properties.setServiceName(applicationName);
+        }
+
+        return new AuditEventBuilder(contextHolder, properties, objectMapper);
     }
 }

@@ -15,15 +15,31 @@
 
 ## 專案概述
 
-本專案實作共用稽核函式庫 (Shared Audit Library)，採用 **AOP (Aspect-Oriented Programming)** 機制，將稽核關注點與業務邏輯完全分離。函式庫可供不同微服務引用，提供宣告式的稽核記錄功能。
+本專案實作共用稽核函式庫 (Shared Audit Library)，提供兩種稽核機制：
+
+1. **AOP (Aspect-Oriented Programming)**：透過 `@Auditable` annotation 自動攔截方法
+2. **Domain Event**：透過領域事件發布，提供更靈活的稽核控制
+
+函式庫可供不同微服務引用，提供宣告式和程式化的稽核記錄功能。
+
+### 分支說明
+
+| 分支 | 說明 |
+|------|------|
+| `main` | 主分支，包含 AOP 與 Domain Event 雙機制 |
+| `domain-event-for-audit` | Domain Event 稽核機制開發分支 |
 
 ### 核心特性
 
+- **雙重稽核機制**：支援 AOP 註解式與 Domain Event 程式化兩種方式
 - **宣告式稽核**：透過 `@Auditable` annotation 標註需要稽核的方法
-- **業務邏輯隔離**：稽核失敗不會影響業務操作
+- **程式化稽核**：透過 `AuditEventPublisher` 發布稽核事件
+- **業務邏輯隔離**：稽核失敗不會影響業務操作 (FR-005)
 - **自動資訊擷取**：自動記錄操作者、時間戳記、Client IP、執行結果
 - **敏感資料遮罩**：支援欄位級別的資料遮罩
 - **可觀測性**：整合 Micrometer 提供 metrics 與 health indicators
+- **OAuth2 安全性**：支援 North-South 與 East-West 安全控制
+- **Spring Cloud Contract**：提供消費者驅動合約測試
 
 ## 技術堆疊
 
@@ -32,11 +48,14 @@
 | 語言 | Java | 17 (LTS) |
 | 框架 | Spring Boot | 3.3.x |
 | AOP | Spring AOP | 6.1.x |
+| 事件 | Spring Events | 6.1.x |
 | 資料存取 | Spring Data JPA | 3.3.x |
+| 安全性 | Spring Security OAuth2 | 6.x |
 | 監控 | Micrometer | 1.12.x |
 | 資料庫 | H2 (Dev) / PostgreSQL (Prod) | - |
 | 測試 | JUnit 5, ArchUnit | 1.2.x |
-| 建置 | Gradle | - |
+| 合約測試 | Spring Cloud Contract | 4.1.x |
+| 建置 | Gradle | 8.5 |
 
 ## 系統架構
 
@@ -366,7 +385,11 @@ audit:
       - token
 ```
 
-### 3. 使用 @Auditable 標註方法
+### 3. 使用稽核機制
+
+#### 方式一：AOP 方式 (@Auditable)
+
+適合簡單的方法級稽核，自動攔截並記錄。
 
 ```java
 @RestController
@@ -389,6 +412,66 @@ public class ProductController {
     public ApiResponse<Void> changePassword(@RequestBody ChangePasswordRequest req) {
         // 密碼欄位會自動遮罩為 "****"
         return ApiResponse.success(null, "Password changed");
+    }
+}
+```
+
+#### 方式二：Domain Event 方式 (推薦)
+
+適合需要更細緻控制的場景，如複雜業務流程、批次操作、或條件式稽核。
+
+```java
+@Service
+public class ProductService {
+
+    private final AuditEventPublisher eventPublisher;
+    private final AuditEventBuilder auditEventBuilder;
+    private final ProductRepository productRepository;
+
+    public Product createProduct(CreateProductCommand cmd) {
+        // 1. 執行業務邏輯
+        Product product = Product.create(cmd);
+        productRepository.save(product);
+
+        // 2. 發布稽核事件
+        eventPublisher.publish(auditEventBuilder.success()
+            .eventType("PRODUCT_CREATED")
+            .aggregateType("Product")
+            .aggregateId(product.getId().toString())
+            .action("createProduct")
+            .payload(product)
+            .build());
+
+        return product;
+    }
+
+    public void updateProduct(UpdateProductCommand cmd) {
+        try {
+            Product product = productRepository.findById(cmd.productId())
+                .orElseThrow(() -> new ProductNotFoundException(cmd.productId()));
+
+            product.update(cmd);
+            productRepository.save(product);
+
+            eventPublisher.publish(auditEventBuilder.success()
+                .eventType("PRODUCT_UPDATED")
+                .aggregateType("Product")
+                .aggregateId(product.getId().toString())
+                .action("updateProduct")
+                .payload(cmd)
+                .build());
+
+        } catch (Exception e) {
+            // 記錄失敗事件
+            eventPublisher.publish(auditEventBuilder.failure(e)
+                .eventType("PRODUCT_UPDATE_FAILED")
+                .aggregateType("Product")
+                .aggregateId(cmd.productId())
+                .action("updateProduct")
+                .build());
+
+            throw e;
+        }
     }
 }
 ```
@@ -500,21 +583,31 @@ rbac-sso-poc/
 │       └── src/
 │           ├── main/java/com/example/audit/
 │           │   ├── annotation/
-│           │   │   └── Auditable.java              # @Auditable 註解
+│           │   │   └── Auditable.java              # @Auditable 註解 (AOP)
 │           │   ├── domain/
 │           │   │   ├── model/
 │           │   │   │   ├── AuditLog.java           # 稽核日誌實體
-│           │   │   │   └── AuditEvent.java         # 事件類型值物件
+│           │   │   │   └── AuditEventType.java     # 事件類型值物件
+│           │   │   ├── event/                      # Domain Event
+│           │   │   │   ├── DomainEvent.java        # 基礎事件介面
+│           │   │   │   ├── AuditableDomainEvent.java # 可稽核事件介面
+│           │   │   │   └── BaseAuditEvent.java     # 事件基礎類別
 │           │   │   └── port/
-│           │   │       └── AuditLogRepository.java # Output Port
+│           │   │       ├── AuditLogRepository.java # Output Port
+│           │   │       └── AuditEventPublisher.java # 事件發布 Port
 │           │   ├── application/
 │           │   │   ├── service/
 │           │   │   │   └── AuditQueryService.java  # 查詢服務
+│           │   │   ├── event/
+│           │   │   │   └── AuditEventBuilder.java  # 事件建構器
 │           │   │   └── dto/
 │           │   │       └── AuditLogView.java       # 查詢 DTO
 │           │   └── infrastructure/
 │           │       ├── aspect/
 │           │       │   └── AuditAspect.java        # AOP 切面
+│           │       ├── event/                      # Domain Event Adapter
+│           │       │   ├── SpringAuditEventPublisher.java
+│           │       │   └── AuditDomainEventListener.java
 │           │       ├── processor/
 │           │       │   ├── PayloadProcessor.java   # Payload 處理
 │           │       │   └── FieldMasker.java        # 欄位遮罩
@@ -522,12 +615,17 @@ rbac-sso-poc/
 │           │       │   └── JpaAuditLogRepository.java
 │           │       ├── context/
 │           │       │   └── AuditContextHolder.java # Thread-local context
+│           │       ├── security/                   # OAuth2 安全
+│           │       │   ├── ServiceTokenProvider.java
+│           │       │   └── ServiceAuthInterceptor.java
 │           │       ├── metrics/
 │           │       │   └── AuditMetrics.java       # Micrometer metrics
 │           │       ├── health/
 │           │       │   └── AuditHealthIndicator.java
 │           │       └── config/
-│           │           └── AuditAutoConfiguration.java
+│           │           ├── AuditAutoConfiguration.java
+│           │           ├── SecurityAutoConfiguration.java
+│           │           └── ServiceAuthConfiguration.java
 │           └── test/java/com/example/audit/
 │               ├── unit/
 │               ├── integration/

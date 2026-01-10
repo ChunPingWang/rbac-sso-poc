@@ -254,6 +254,61 @@ public class PayloadProcessor {
     }
 
     /**
+     * Process an already-serialized JSON payload with masking.
+     *
+     * @param jsonPayload the JSON string to process
+     * @param maskFields  fields to mask
+     * @return processed payload with truncation flag
+     */
+    @SuppressWarnings("unchecked")
+    public ProcessedPayload processJsonPayload(String jsonPayload, String[] maskFields) {
+        if (jsonPayload == null || jsonPayload.isEmpty()) {
+            return new ProcessedPayload(jsonPayload, false);
+        }
+
+        try {
+            // Parse JSON
+            Object parsed = objectMapper.readValue(jsonPayload, Object.class);
+
+            // Apply masking
+            Set<String> allMaskFields = new HashSet<>(auditProperties.getMasking().getDefaultFields());
+            if (maskFields != null) {
+                allMaskFields.addAll(Arrays.asList(maskFields));
+            }
+
+            if (parsed instanceof Map) {
+                applyMasking((Map<String, Object>) parsed, allMaskFields, "");
+            } else if (parsed instanceof List<?> list) {
+                for (Object item : list) {
+                    if (item instanceof Map) {
+                        applyMasking((Map<String, Object>) item, allMaskFields, "");
+                    }
+                }
+            }
+
+            // Serialize back to JSON
+            String json = objectMapper.writeValueAsString(parsed);
+
+            // Check size limit
+            int maxSize = auditProperties.getPayload().getMaxSize();
+            if (json.length() > maxSize) {
+                return truncatePayload(json, maxSize);
+            }
+
+            return new ProcessedPayload(json, false);
+
+        } catch (Exception e) {
+            log.warn("Failed to process JSON payload for masking", e);
+            // Return original payload if masking fails
+            int maxSize = auditProperties.getPayload().getMaxSize();
+            if (jsonPayload.length() > maxSize) {
+                return truncatePayload(jsonPayload, maxSize);
+            }
+            return new ProcessedPayload(jsonPayload, false);
+        }
+    }
+
+    /**
      * Result of payload processing.
      */
     public record ProcessedPayload(String payload, boolean isTruncated) {

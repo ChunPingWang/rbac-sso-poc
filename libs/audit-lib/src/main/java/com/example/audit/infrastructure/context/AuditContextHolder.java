@@ -28,11 +28,18 @@ public class AuditContextHolder {
     private static final String HEADER_X_FORWARDED_FOR = "X-Forwarded-For";
 
     /**
-     * Gets the current username from SecurityContext.
+     * Gets the current username from MDC (if set programmatically) or SecurityContext.
      *
      * @return the username, or empty if not authenticated
      */
     public Optional<String> getCurrentUsername() {
+        // First check MDC for programmatically set username
+        String mdcUsername = MDC.get("audit.username");
+        if (mdcUsername != null && !mdcUsername.isEmpty()) {
+            return Optional.of(mdcUsername);
+        }
+
+        // Fall back to SecurityContext
         try {
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
             if (auth != null && auth.isAuthenticated() && !"anonymousUser".equals(auth.getPrincipal())) {
@@ -45,12 +52,19 @@ public class AuditContextHolder {
     }
 
     /**
-     * Gets the client IP address from the current request.
+     * Gets the client IP address from MDC (if set programmatically) or current request.
      * Supports X-Forwarded-For header for proxied requests.
      *
      * @return the client IP, or empty if not in request context
      */
     public Optional<String> getClientIp() {
+        // First check MDC for programmatically set client IP
+        String mdcClientIp = MDC.get("audit.clientIp");
+        if (mdcClientIp != null && !mdcClientIp.isEmpty()) {
+            return Optional.of(mdcClientIp);
+        }
+
+        // Fall back to request context
         try {
             var requestAttributes = RequestContextHolder.getRequestAttributes();
             if (requestAttributes instanceof ServletRequestAttributes servletAttrs) {
@@ -99,5 +113,45 @@ public class AuditContextHolder {
         }
 
         return Optional.empty();
+    }
+
+    // ========== Setter methods for testing and programmatic context setting ==========
+
+    /**
+     * Sets the current username in MDC for audit context.
+     * This is useful for background jobs or tests where SecurityContext is not available.
+     *
+     * @param username the username to set
+     */
+    public void setCurrentUsername(String username) {
+        MDC.put("audit.username", username);
+    }
+
+    /**
+     * Sets the client IP in MDC for audit context.
+     * This is useful for background jobs or tests where request context is not available.
+     *
+     * @param clientIp the client IP to set
+     */
+    public void setClientIp(String clientIp) {
+        MDC.put("audit.clientIp", clientIp);
+    }
+
+    /**
+     * Sets the correlation ID in MDC.
+     *
+     * @param correlationId the correlation ID to set
+     */
+    public void setCorrelationId(String correlationId) {
+        MDC.put(MDC_CORRELATION_ID, correlationId);
+    }
+
+    /**
+     * Clears all audit context from MDC.
+     */
+    public void clear() {
+        MDC.remove("audit.username");
+        MDC.remove("audit.clientIp");
+        MDC.remove(MDC_CORRELATION_ID);
     }
 }
