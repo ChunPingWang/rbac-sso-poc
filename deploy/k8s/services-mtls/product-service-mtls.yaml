@@ -1,0 +1,130 @@
+# ==============================================================================
+# Product Service Deployment with mTLS
+#
+# 說明：啟用 mTLS 的 Product Service 部署配置
+# 前置條件：cert-manager 已安裝且憑證已簽發
+# ==============================================================================
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service
+  namespace: rbac-sso
+  labels:
+    app: product-service
+    tier: application
+    security: mtls
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: product-service
+  template:
+    metadata:
+      labels:
+        app: product-service
+        tier: application
+        security: mtls
+      annotations:
+        # 憑證更新時自動重啟 Pod
+        checksum/cert: "{{ .Values.certChecksum }}"
+    spec:
+      serviceAccountName: product-service
+      containers:
+        - name: product-service
+          image: rbac-product-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8081
+              name: https
+          env:
+            # 啟用 mTLS profile
+            - name: SPRING_PROFILES_ACTIVE
+              value: "k8s,mtls"
+            - name: SERVER_PORT
+              value: "8081"
+            - name: KEYCLOAK_ISSUER_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: rbac-config
+                  key: KEYCLOAK_ISSUER_URI
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:h2:file:/data/productdb"
+            # mTLS 配置
+            - name: MTLS_ENABLED
+              value: "true"
+            - name: MTLS_CERTIFICATE
+              value: "/etc/ssl/certs/tls.crt"
+            - name: MTLS_PRIVATE_KEY
+              value: "/etc/ssl/certs/tls.key"
+            - name: MTLS_CA_CERTIFICATE
+              value: "/etc/ssl/certs/ca.crt"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            # 掛載 TLS 憑證
+            - name: tls-certs
+              mountPath: /etc/ssl/certs
+              readOnly: true
+          # 使用 HTTPS 健康檢查
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
+              scheme: HTTPS
+            initialDelaySeconds: 90
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8081
+              scheme: HTTPS
+            initialDelaySeconds: 45
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: data
+          emptyDir: {}
+        # TLS 憑證來自 cert-manager
+        - name: tls-certs
+          secret:
+            secretName: product-service-tls-secret
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+              - key: ca.crt
+                path: ca.crt
+---
+# ServiceAccount for mTLS identity
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: product-service
+  namespace: rbac-sso
+  labels:
+    app: product-service
+---
+# Service (HTTPS)
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-service
+  namespace: rbac-sso
+  labels:
+    app: product-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8081
+      targetPort: 8081
+      name: https
+  selector:
+    app: product-service

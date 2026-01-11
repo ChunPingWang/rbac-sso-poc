@@ -1,0 +1,120 @@
+# ==============================================================================
+# User Service Deployment with mTLS
+#
+# 說明：啟用 mTLS 的 User Service 部署配置
+# 前置條件：cert-manager 已安裝且憑證已簽發
+# ==============================================================================
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: rbac-sso
+  labels:
+    app: user-service
+    tier: application
+    security: mtls
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+        tier: application
+        security: mtls
+    spec:
+      serviceAccountName: user-service
+      containers:
+        - name: user-service
+          image: rbac-user-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8082
+              name: https
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "k8s,mtls"
+            - name: SERVER_PORT
+              value: "8082"
+            - name: KEYCLOAK_ISSUER_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: rbac-config
+                  key: KEYCLOAK_ISSUER_URI
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:h2:file:/data/userdb"
+            - name: MTLS_ENABLED
+              value: "true"
+            - name: MTLS_CERTIFICATE
+              value: "/etc/ssl/certs/tls.crt"
+            - name: MTLS_PRIVATE_KEY
+              value: "/etc/ssl/certs/tls.key"
+            - name: MTLS_CA_CERTIFICATE
+              value: "/etc/ssl/certs/ca.crt"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tls-certs
+              mountPath: /etc/ssl/certs
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8082
+              scheme: HTTPS
+            initialDelaySeconds: 90
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8082
+              scheme: HTTPS
+            initialDelaySeconds: 45
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: tls-certs
+          secret:
+            secretName: user-service-tls-secret
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+              - key: ca.crt
+                path: ca.crt
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: user-service
+  namespace: rbac-sso
+  labels:
+    app: user-service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: rbac-sso
+  labels:
+    app: user-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8082
+      targetPort: 8082
+      name: https
+  selector:
+    app: user-service

@@ -1,0 +1,138 @@
+# ==============================================================================
+# Service Certificates for mTLS
+#
+# 說明：為每個微服務建立 TLS 憑證，用於服務間的雙向認證
+#
+# 憑證包含：
+#   - tls.crt: 服務憑證
+#   - tls.key: 私鑰
+#   - ca.crt: CA 憑證 (用於驗證其他服務)
+# ==============================================================================
+
+# Gateway Service Certificate
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gateway-tls
+  namespace: rbac-sso
+spec:
+  secretName: gateway-tls-secret
+  duration: 8760h    # 1 year
+  renewBefore: 720h  # 30 days
+  commonName: gateway
+  isCA: false
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+    - client auth
+  dnsNames:
+    - gateway
+    - gateway.rbac-sso
+    - gateway.rbac-sso.svc
+    - gateway.rbac-sso.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  issuerRef:
+    name: rbac-sso-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+
+# Product Service Certificate
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: product-service-tls
+  namespace: rbac-sso
+spec:
+  secretName: product-service-tls-secret
+  duration: 8760h
+  renewBefore: 720h
+  commonName: product-service
+  isCA: false
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+    - client auth
+  dnsNames:
+    - product-service
+    - product-service.rbac-sso
+    - product-service.rbac-sso.svc
+    - product-service.rbac-sso.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  issuerRef:
+    name: rbac-sso-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+
+# User Service Certificate
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: user-service-tls
+  namespace: rbac-sso
+spec:
+  secretName: user-service-tls-secret
+  duration: 8760h
+  renewBefore: 720h
+  commonName: user-service
+  isCA: false
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+    - client auth
+  dnsNames:
+    - user-service
+    - user-service.rbac-sso
+    - user-service.rbac-sso.svc
+    - user-service.rbac-sso.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  issuerRef:
+    name: rbac-sso-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+
+# Keycloak Service Certificate
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: keycloak-tls
+  namespace: rbac-sso
+spec:
+  secretName: keycloak-tls-secret
+  duration: 8760h
+  renewBefore: 720h
+  commonName: keycloak
+  isCA: false
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+    - client auth
+  dnsNames:
+    - keycloak
+    - keycloak.rbac-sso
+    - keycloak.rbac-sso.svc
+    - keycloak.rbac-sso.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  issuerRef:
+    name: rbac-sso-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io

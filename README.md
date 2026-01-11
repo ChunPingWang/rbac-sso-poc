@@ -29,6 +29,7 @@
 - [測試案例說明](#測試案例說明)
 - [Docker 整合測試](#docker-整合測試)
 - [Kubernetes 整合測試](#kubernetes-整合測試)
+- [mTLS 東西向安全](#mtls-東西向安全-spring-boot--cert-manager)
 - [Keycloak LDAP 整合教學](#keycloak-ldap-整合教學)
 - [快速開始](#快速開始)
 - [專案結構](#專案結構)
@@ -51,6 +52,7 @@
 | **CQRS 模式** | 命令/查詢分離 | Done |
 | **稽核日誌** | Spring AOP / Domain Event 雙機制 | Done |
 | **BDD 測試** | Cucumber + 中文 Gherkin | Done |
+| **mTLS 東西向安全** | Spring Boot SSL + cert-manager 憑證管理 | Done |
 
 ---
 
@@ -1155,6 +1157,192 @@ curl http://localhost:8082/actuator/health  # User Service
 
 # 刪除 cluster
 ./deploy/scripts/k8s-deploy.sh --delete
+```
+
+---
+
+## mTLS 東西向安全 (Spring Boot + cert-manager)
+
+### 架構概述
+
+本專案實作了基於 Spring Boot SSL Bundle + cert-manager 的 mTLS (Mutual TLS) 方案，用於服務間的雙向認證和加密通訊。
+
+```mermaid
+flowchart TB
+    subgraph CertManager["cert-manager (憑證管理)"]
+        SI[SelfSigned Issuer]
+        CA[CA Certificate]
+        CAI[CA Issuer]
+    end
+
+    subgraph Certs["服務憑證"]
+        GC[Gateway TLS Secret]
+        PC[Product Service TLS Secret]
+        UC[User Service TLS Secret]
+    end
+
+    subgraph Services["微服務 (mTLS 啟用)"]
+        GW[Gateway<br/>:8080 HTTPS]
+        PS[Product Service<br/>:8081 HTTPS]
+        US[User Service<br/>:8082 HTTPS]
+    end
+
+    SI -->|簽發| CA
+    CA -->|建立| CAI
+    CAI -->|簽發| GC
+    CAI -->|簽發| PC
+    CAI -->|簽發| UC
+
+    GC -->|掛載| GW
+    PC -->|掛載| PS
+    UC -->|掛載| US
+
+    GW <-->|mTLS| PS
+    GW <-->|mTLS| US
+    PS <-->|mTLS| US
+```
+
+### 憑證結構
+
+```
+/etc/ssl/certs/
+├── tls.crt      # 服務憑證 (由 CA 簽發)
+├── tls.key      # 私鑰
+└── ca.crt       # CA 憑證 (用於驗證對方服務)
+```
+
+### mTLS 配置檔案
+
+| 檔案路徑 | 說明 |
+|----------|------|
+| `deploy/k8s/security/cert-manager/ca-issuer.yaml` | CA Issuer 和根憑證配置 |
+| `deploy/k8s/security/cert-manager/service-certificates.yaml` | 各服務的憑證申請 |
+| `deploy/k8s/services-mtls/*.yaml` | mTLS 啟用的 K8s 部署配置 |
+| `services/*/src/main/resources/application-mtls.yml` | Spring Boot mTLS 配置 |
+| `libs/audit-lib/.../MtlsWebClientConfiguration.java` | mTLS WebClient 配置類 |
+
+### Spring Boot SSL Bundle 配置
+
+```yaml
+# application-mtls.yml
+server:
+  port: 8081
+  ssl:
+    enabled: true
+    certificate: /etc/ssl/certs/tls.crt
+    certificate-private-key: /etc/ssl/certs/tls.key
+    client-auth: need  # 強制客戶端憑證驗證
+    trust-store: /etc/ssl/certs/ca.crt
+    enabled-protocols: TLSv1.3,TLSv1.2
+
+spring:
+  ssl:
+    bundle:
+      pem:
+        mtls-bundle:
+          keystore:
+            certificate: /etc/ssl/certs/tls.crt
+            private-key: /etc/ssl/certs/tls.key
+          truststore:
+            certificate: /etc/ssl/certs/ca.crt
+```
+
+### cert-manager 憑證資源
+
+```yaml
+# service-certificates.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: product-service-tls
+  namespace: rbac-sso
+spec:
+  secretName: product-service-tls-secret
+  duration: 8760h    # 1 年
+  renewBefore: 720h  # 30 天前自動更新
+  commonName: product-service
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+    - client auth
+  dnsNames:
+    - product-service
+    - product-service.rbac-sso.svc.cluster.local
+  issuerRef:
+    name: rbac-sso-ca-issuer
+    kind: ClusterIssuer
+```
+
+### 使用 mTLS WebClient
+
+```java
+@Autowired
+@Qualifier("mtlsWebClient")
+private WebClient mtlsWebClient;
+
+// 呼叫其他服務 (自動帶客戶端憑證)
+String response = mtlsWebClient.get()
+    .uri("https://product-service:8081/api/products")
+    .retrieve()
+    .bodyToMono(String.class)
+    .block();
+```
+
+### 部署 mTLS 環境
+
+```bash
+# 1. 安裝 cert-manager
+./deploy/scripts/k8s-mtls-deploy.sh --install-cert-manager
+
+# 2. 部署含 mTLS 的服務 (需先建置 Docker images)
+./deploy/scripts/k8s-mtls-deploy.sh --build
+
+# 3. 驗證 mTLS 連線
+./deploy/scripts/k8s-mtls-deploy.sh --verify
+
+# 4. 查看憑證狀態
+kubectl get certificates -n rbac-sso
+```
+
+### 安全控管狀態
+
+| 層級 | 控制項 | 狀態 | 說明 |
+|------|--------|:----:|------|
+| **南北向** | OAuth2/OIDC | Done | Keycloak 整合 |
+| | JWT 驗證 | Done | Spring Security |
+| | RBAC 權限控制 | Done | 角色基礎存取控制 |
+| **東西向** | OAuth2 Client Credentials | Done | ServiceTokenProvider |
+| | mTLS | Done | Spring Boot + cert-manager |
+| | 憑證自動更新 | Done | cert-manager renewBefore |
+
+### mTLS 序列圖
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant CM as cert-manager
+    participant GW as Gateway
+    participant PS as Product Service
+
+    Note over CM: 憑證簽發流程
+    CM->>CM: 建立 Self-Signed CA
+    CM->>GW: 簽發 gateway-tls-secret
+    CM->>PS: 簽發 product-service-tls-secret
+
+    Note over GW,PS: mTLS 握手
+    GW->>PS: ClientHello
+    PS->>GW: ServerHello + Certificate
+    PS->>GW: CertificateRequest
+    GW->>PS: Certificate (Gateway's cert)
+    GW->>PS: CertificateVerify
+    PS->>PS: 驗證 Gateway 憑證 (使用 CA)
+    GW->>GW: 驗證 Product Service 憑證 (使用 CA)
+
+    Note over GW,PS: 加密通訊
+    GW->>PS: HTTPS Request (encrypted)
+    PS->>GW: HTTPS Response (encrypted)
 ```
 
 ---

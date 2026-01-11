@@ -1,0 +1,12 @@
+# ==============================================================================
+# cert-manager Namespace
+#
+# 說明：cert-manager 的專用 namespace
+# 注意：如果使用 kubectl apply -f 安裝 cert-manager，此 namespace 會自動建立
+# ==============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+  labels:
+    app.kubernetes.io/name: cert-manager
