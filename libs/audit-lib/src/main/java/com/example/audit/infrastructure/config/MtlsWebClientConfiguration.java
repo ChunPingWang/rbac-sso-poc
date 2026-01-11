@@ -2,6 +2,7 @@ package com.example.audit.infrastructure.config;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.ssl.SslBundle;
 import org.springframework.boot.ssl.SslBundles;
@@ -57,6 +58,7 @@ import javax.net.ssl.SSLException;
  * @see org.springframework.boot.ssl.SslBundles
  */
 @Configuration
+@ConditionalOnClass(name = "org.springframework.web.reactive.function.client.WebClient")
 @ConditionalOnProperty(name = "mtls.enabled", havingValue = "true")
 public class MtlsWebClientConfiguration {
 

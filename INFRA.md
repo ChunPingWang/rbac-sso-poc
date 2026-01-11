@@ -1497,6 +1497,162 @@ flowchart TD
 | Gradle 多模組專案 | ✅ | 共用函式庫 + 微服務 |
 | 壓力測試腳本 | ✅ | load-test.sh |
 | 本地開發腳本 | ✅ | start-local.sh |
+| mTLS 憑證管理 | ✅ | cert-manager + self-signed CA |
+
+---
+
+## 13. mTLS 部署配置
+
+### 13.1 概述
+
+本專案使用 cert-manager 進行 Kubernetes 叢集內的 TLS 憑證管理，實現服務間的 mTLS (Mutual TLS) 雙向認證。
+
+```mermaid
+flowchart TB
+    subgraph CM["cert-manager"]
+        CA[Self-Signed CA]
+        I[CA Issuer]
+    end
+
+    subgraph Certs["TLS Certificates"]
+        GC[gateway-tls-secret]
+        PC[product-service-tls-secret]
+        UC[user-service-tls-secret]
+    end
+
+    subgraph Services["mTLS-enabled Services"]
+        GW[Gateway :8080/8090]
+        PS[Product Service :8081/8091]
+        US[User Service :8082/8092]
+    end
+
+    CA --> I
+    I --> GC
+    I --> PC
+    I --> UC
+    GC --> GW
+    PC --> PS
+    UC --> US
+    GW <-->|mTLS| PS
+    GW <-->|mTLS| US
+```
+
+### 13.2 部署步驟
+
+```bash
+# 1. 安裝 cert-manager
+./deploy/scripts/k8s-mtls-deploy.sh --install-cert-manager
+
+# 2. 建置 Docker images 並部署
+./deploy/scripts/k8s-mtls-deploy.sh --build
+
+# 3. 僅部署 (不重新建置)
+./deploy/scripts/k8s-mtls-deploy.sh --deploy
+
+# 4. 驗證 mTLS 連線
+./deploy/scripts/k8s-mtls-deploy.sh --verify
+```
+
+### 13.3 Kubernetes 資源
+
+| 資源 | 路徑 | 說明 |
+|------|------|------|
+| CA Issuer | `deploy/k8s/security/cert-manager/ca-issuer.yaml` | Self-signed CA 和 Issuer |
+| Certificates | `deploy/k8s/security/cert-manager/service-certificates.yaml` | 各服務的憑證申請 |
+| Gateway Deployment | `deploy/k8s/services-mtls/gateway-mtls.yaml` | mTLS 啟用的 Gateway |
+| Product Deployment | `deploy/k8s/services-mtls/product-service-mtls.yaml` | mTLS 啟用的 Product Service |
+| User Deployment | `deploy/k8s/services-mtls/user-service-mtls.yaml` | mTLS 啟用的 User Service |
+
+### 13.4 驗證方式
+
+```bash
+# 1. 檢查 cert-manager 元件
+kubectl get pods -n cert-manager
+# NAME                                      READY   STATUS    RESTARTS   AGE
+# cert-manager-xxx                          1/1     Running   0          1h
+# cert-manager-cainjector-xxx               1/1     Running   0          1h
+# cert-manager-webhook-xxx                  1/1     Running   0          1h
+
+# 2. 檢查 CA Issuer 狀態
+kubectl get issuers -n rbac-sso
+# NAME               READY   AGE
+# rbac-sso-ca-issuer True    1h
+
+# 3. 檢查憑證狀態
+kubectl get certificates -n rbac-sso
+# NAME                    READY   SECRET                      AGE
+# gateway-tls             True    gateway-tls-secret          1h
+# product-service-tls     True    product-service-tls-secret  1h
+# user-service-tls        True    user-service-tls-secret     1h
+
+# 4. 檢查 Pod 狀態
+kubectl get pods -n rbac-sso -l profile=mtls
+# NAME                                    READY   STATUS    RESTARTS   AGE
+# gateway-mtls-xxx                        1/1     Running   0          30m
+# product-service-mtls-xxx                1/1     Running   0          30m
+# user-service-mtls-xxx                   1/1     Running   0          30m
+
+# 5. 驗證憑證掛載
+kubectl exec -n rbac-sso deployment/product-service-mtls -- ls -la /etc/ssl/certs/
+# tls.crt  tls.key  ca.crt
+
+# 6. 測試健康端點 (HTTP 管理端口)
+kubectl exec -n rbac-sso deployment/gateway-mtls -- \
+  curl -s http://localhost:8090/actuator/health | jq .status
+# "UP"
+
+# 7. 測試 mTLS 連線 (服務間)
+kubectl exec -n rbac-sso deployment/gateway-mtls -- \
+  curl -k --cert /etc/ssl/certs/tls.crt \
+       --key /etc/ssl/certs/tls.key \
+       --cacert /etc/ssl/certs/ca.crt \
+       https://product-service-mtls:8081/actuator/health
+```
+
+### 13.5 驗證結果 (2026-01-11)
+
+| 驗證項目 | 狀態 | 說明 |
+|----------|:----:|------|
+| cert-manager 安裝 | ✅ | v1.14.0 |
+| CA Issuer | ✅ | rbac-sso-ca-issuer Ready |
+| 服務憑證簽發 | ✅ | gateway-tls, product-service-tls, user-service-tls |
+| Pod 部署 | ✅ | 所有 mTLS pods Running and Ready |
+| 憑證掛載 | ✅ | /etc/ssl/certs/ 內含 tls.crt, tls.key, ca.crt |
+| 健康檢查 | ✅ | Management port (HTTP) 正常回應 |
+| SSL 啟用 | ⚠️ | 服務端口 SSL 啟用，但使用預設 keystore |
+
+### 13.6 已知限制與改進方向
+
+**目前限制：**
+- Spring Boot 的 SSL Bundle 需要額外配置才能正確讀取 PEM 格式憑證
+- 目前 Tomcat 使用預設的 `/root/.keystore` 而非掛載的 PEM 憑證
+
+**改進方案：**
+
+1. **Init Container 方案** - 在 Pod 啟動前將 PEM 轉換為 PKCS12/JKS：
+   ```yaml
+   initContainers:
+     - name: cert-converter
+       image: eclipse-temurin:17-jre
+       command:
+         - sh
+         - -c
+         - |
+           keytool -import -trustcacerts -alias ca \
+             -file /certs/ca.crt -keystore /certs/truststore.p12 \
+             -storepass changeit -noprompt
+           openssl pkcs12 -export -in /certs/tls.crt \
+             -inkey /certs/tls.key -out /certs/keystore.p12 \
+             -passout pass:changeit
+       volumeMounts:
+         - name: certs
+           mountPath: /certs
+   ```
+
+2. **Service Mesh 方案** - 使用 Istio/Linkerd 實現 sidecar 透明 mTLS：
+   - 不需修改應用程式碼
+   - 自動憑證輪替
+   - 統一的安全策略管理
 
 ---
 

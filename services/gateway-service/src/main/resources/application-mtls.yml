@@ -7,32 +7,12 @@
 # 憑證來源：cert-manager 自動掛載到 /etc/ssl/certs/
 # ==============================================================================
 
-server:
-  port: 8080
-  ssl:
-    enabled: true
-    # 服務端憑證 (來自 cert-manager)
-    key-store-type: PEM
-    key-store: /etc/ssl/certs/tls.crt
-    key-store-password: ""
-    # 私鑰
-    key-alias: gateway
-    certificate: /etc/ssl/certs/tls.crt
-    certificate-private-key: /etc/ssl/certs/tls.key
-    # 客戶端憑證驗證 (對外可選，對內強制)
-    client-auth: want  # Gateway 對外接收請求，不強制客戶端憑證
-    trust-store-type: PEM
-    trust-store: /etc/ssl/certs/ca.crt
-    # TLS 版本限制
-    protocol: TLS
-    enabled-protocols: TLSv1.3,TLSv1.2
-
+# SSL Bundle 配置 (Spring Boot 3.1+)
 spring:
-  # SSL Bundle 配置 (Spring Boot 3.1+)
   ssl:
     bundle:
       pem:
-        mtls-bundle:
+        mtls:
           keystore:
             certificate: /etc/ssl/certs/tls.crt
             private-key: /etc/ssl/certs/tls.key
@@ -41,14 +21,6 @@ spring:
 
   cloud:
     gateway:
-      # 配置 HttpClient 使用 mTLS
-      httpclient:
-        ssl:
-          trustedX509Certificates:
-            - /etc/ssl/certs/ca.crt
-          key-store: /etc/ssl/certs/tls.crt
-          key-store-password: ""
-
       routes:
         # Product Service (使用 HTTPS)
         - id: product-service
@@ -66,16 +38,24 @@ spring:
           filters:
             - StripPrefix=0
 
-# 健康檢查
+server:
+  port: 8080
+  ssl:
+    enabled: true
+    bundle: mtls
+    client-auth: want  # 對外可選，內部需要
+    enabled-protocols: TLSv1.3,TLSv1.2
+
+# 健康檢查 (使用獨立的 HTTP 端口供 K8s 探針使用)
 management:
   server:
-    port: 8080
+    port: 8090
     ssl:
-      enabled: true
-      certificate: /etc/ssl/certs/tls.crt
-      certificate-private-key: /etc/ssl/certs/tls.key
-      trust-certificate: /etc/ssl/certs/ca.crt
-      client-auth: none
+      enabled: false  # 明確禁用管理端口的 SSL
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway
 
 logging:
   level:
