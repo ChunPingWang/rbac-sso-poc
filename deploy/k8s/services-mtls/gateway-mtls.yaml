@@ -34,6 +34,8 @@ spec:
           ports:
             - containerPort: 8080
               name: https
+            - containerPort: 8090
+              name: management
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: "k8s,mtls"
@@ -59,15 +61,15 @@ spec:
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
-              port: 8080
-              scheme: HTTPS
+              port: 8090
+              scheme: HTTP
             initialDelaySeconds: 90
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
-              port: 8080
-              scheme: HTTPS
+              port: 8090
+              scheme: HTTP
             initialDelaySeconds: 45
             periodSeconds: 5
           resources:

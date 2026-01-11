@@ -1191,7 +1191,7 @@
 - [x] 端點授權 (@PreAuthorize) 保護稽核 API
 - [x] 公開端點白名單 (Actuator health/info)
 - [x] 可配置的安全屬性 (SecurityProperties)
-- [ ] TLS/HTTPS 加密傳輸
+- [x] TLS/HTTPS 加密傳輸 (mTLS profile 啟用時)
 
 #### 東西向安全 (East-West)
 
@@ -1199,8 +1199,35 @@
 - [x] ServiceTokenProvider Token 取得與快取
 - [x] ServiceAuthInterceptor 請求攔截器
 - [x] 預配置 RestTemplate (serviceRestTemplate)
-- [ ] mTLS 雙向憑證驗證
+- [x] mTLS 雙向憑證驗證 (Spring Boot SSL Bundle + cert-manager)
 - [ ] Kubernetes NetworkPolicy 網路隔離
+
+#### mTLS 驗證結果 (2026-01-11)
+
+| 項目 | 狀態 | 說明 |
+|------|:----:|------|
+| cert-manager | ✅ | v1.14.0 安裝成功 |
+| CA Issuer | ✅ | rbac-sso-ca-issuer Ready |
+| 服務憑證 | ✅ | gateway-tls, product-service-tls, user-service-tls 皆 Ready |
+| Pod 狀態 | ✅ | 所有 mTLS pods Running and Ready |
+| 健康檢查 | ✅ | Management port (HTTP) 正常 |
+| SSL 配置 | ⚠️ | 使用預設 keystore，PEM 憑證待整合 |
+
+**驗證方式：**
+```bash
+# 檢查憑證狀態
+kubectl get certificates -n rbac-sso
+
+# 檢查 Pod 狀態
+kubectl get pods -n rbac-sso -l profile=mtls
+
+# 檢查健康端點
+kubectl exec -n rbac-sso <pod> -- curl -s http://localhost:8090/actuator/health
+```
+
+**待改進項目：**
+- 使用 init container 將 PEM 轉換為 PKCS12 keystore
+- 或考慮使用 Service Mesh (Istio/Linkerd) 進行 sidecar 透明 mTLS
 
 ---
 

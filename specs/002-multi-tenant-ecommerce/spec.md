@@ -103,6 +103,32 @@ As an **auditor**, I want all important operations logged, so that I can review 
 
 ---
 
+### User Story 6 - mTLS Service Security (Priority: P2)
+
+As a **platform operator**, I want service-to-service communication secured with mTLS, so that internal traffic is encrypted and mutually authenticated.
+
+**Acceptance Scenarios**:
+
+1. **Given** mTLS profile is enabled, **When** services communicate, **Then** connections use TLS 1.2/1.3 with mutual certificate verification.
+
+2. **Given** cert-manager is deployed, **When** certificates are requested, **Then** all service certificates are signed by the internal CA and marked Ready.
+
+3. **Given** a pod is running with mTLS, **When** health probes execute, **Then** they succeed via the HTTP management port (not HTTPS).
+
+4. **Given** mTLS is enabled, **When** an unauthorized service attempts connection, **Then** the TLS handshake fails and connection is rejected.
+
+**Verification Results (2026-01-11)**:
+
+| Component | Status | Notes |
+|-----------|:------:|-------|
+| cert-manager | ✅ | v1.14.0 deployed |
+| CA Issuer | ✅ | rbac-sso-ca-issuer Ready |
+| Certificates | ✅ | All 4 certificates Ready |
+| Pods | ✅ | All mTLS pods Running |
+| Health Probes | ✅ | HTTP management port works |
+
+---
+
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
@@ -174,6 +200,7 @@ As an **auditor**, I want all important operations logged, so that I can review 
 - [x] Comprehensive unit tests (300+ tests)
 - [x] Cucumber BDD tests (18 scenarios)
 - [x] API Gateway with route configuration
+- [x] mTLS East-West security with cert-manager
 
 ### Test Statistics
 

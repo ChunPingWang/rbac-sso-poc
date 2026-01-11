@@ -37,6 +37,8 @@ spec:
           ports:
             - containerPort: 8081
               name: https
+            - containerPort: 8091
+              name: management
           env:
             # 啟用 mTLS profile
             - name: SPRING_PROFILES_ACTIVE
@@ -66,19 +68,19 @@ spec:
             - name: tls-certs
               mountPath: /etc/ssl/certs
               readOnly: true
-          # 使用 HTTPS 健康檢查
+          # 使用管理端口 HTTP 健康檢查 (主服務端口使用 HTTPS)
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
-              port: 8081
-              scheme: HTTPS
+              port: 8091
+              scheme: HTTP
             initialDelaySeconds: 90
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
-              port: 8081
-              scheme: HTTPS
+              port: 8091
+              scheme: HTTP
             initialDelaySeconds: 45
             periodSeconds: 5
           resources:

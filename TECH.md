@@ -994,6 +994,97 @@ public class ManualAuthService {
 }
 ```
 
+### 6.5 mTLS 雙向憑證驗證 (East-West)
+
+除了 OAuth2 Token 認證外，本專案也支援 mTLS (Mutual TLS) 提供傳輸層的雙向身份驗證和加密。
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        mTLS Architecture (East-West)                             │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│   ┌──────────────┐                    ┌──────────────┐                          │
+│   │   Gateway    │ ═══════════════════│  Product     │                          │
+│   │   Service    │ ◄─── mTLS ───────► │  Service     │                          │
+│   │              │  (雙向憑證驗證)      │              │                          │
+│   │  Port 8080   │                    │  Port 8081   │                          │
+│   │  Mgmt 8090   │                    │  Mgmt 8091   │                          │
+│   └──────────────┘                    └──────────────┘                          │
+│          ║                                   ║                                   │
+│          ║ cert-manager                      ║ cert-manager                      │
+│          ▼                                   ▼                                   │
+│   ┌─────────────────────────────────────────────────────────────────────────┐   │
+│   │                           CA Issuer (cert-manager)                       │   │
+│   │                      簽發所有服務的 TLS 憑證                              │   │
+│   └─────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Spring Boot SSL Bundle 配置
+
+```yaml
+# application-mtls.yml
+spring:
+  ssl:
+    bundle:
+      pem:
+        mtls:
+          keystore:
+            certificate: /etc/ssl/certs/tls.crt
+            private-key: /etc/ssl/certs/tls.key
+          truststore:
+            certificate: /etc/ssl/certs/ca.crt
+
+server:
+  port: 8081
+  ssl:
+    enabled: true
+    bundle: mtls
+    client-auth: need              # 要求客戶端提供憑證
+    enabled-protocols: TLSv1.3,TLSv1.2
+
+# 健康檢查使用獨立 HTTP 端口
+management:
+  server:
+    port: 8091
+    ssl:
+      enabled: false               # K8s probes 使用 HTTP
+```
+
+#### mTLS 配置要點
+
+| 項目 | 說明 |
+|------|------|
+| `client-auth: need` | 後端服務要求客戶端憑證（強制 mTLS） |
+| `client-auth: want` | Gateway 對外可選，對內需要 |
+| `management.server.ssl.enabled: false` | 管理端口使用 HTTP 供 K8s 健康檢查 |
+| `enabled-protocols` | 僅允許 TLS 1.2/1.3，禁用舊版協議 |
+
+#### 驗證方式
+
+```bash
+# 1. 檢查憑證狀態
+kubectl get certificates -n rbac-sso
+# NAME                    READY   SECRET                      AGE
+# gateway-tls             True    gateway-tls-secret          1h
+# product-service-tls     True    product-service-tls-secret  1h
+
+# 2. 檢查 Pod SSL 配置
+kubectl logs -n rbac-sso deployment/product-service-mtls | grep SSL
+
+# 3. 驗證憑證掛載
+kubectl exec -n rbac-sso <pod> -- ls -la /etc/ssl/certs/
+# tls.crt, tls.key, ca.crt
+
+# 4. 測試 mTLS 連線
+kubectl exec -n rbac-sso <gateway-pod> -- \
+  curl -k --cert /etc/ssl/certs/tls.crt \
+       --key /etc/ssl/certs/tls.key \
+       --cacert /etc/ssl/certs/ca.crt \
+       https://product-service:8081/actuator/health
+```
+
 ---
 
 ## 7. 架構測試 (ArchUnit)

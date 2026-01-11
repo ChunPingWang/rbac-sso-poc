@@ -43,6 +43,10 @@ dependencies {
     compileOnly 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
     compileOnly 'org.springframework.security:spring-security-oauth2-jose'
 
+    // WebFlux and Netty (for mTLS WebClient)
+    compileOnly 'org.springframework.boot:spring-boot-starter-webflux'
+    compileOnly 'io.projectreactor.netty:reactor-netty-http'
+
     // Micrometer for metrics
     api 'io.micrometer:micrometer-core'
 
