@@ -4,9 +4,9 @@
 
 | 項目 | 內容 |
 |------|------|
-| 文件版本 | 3.1 |
+| 文件版本 | 3.2 |
 | 建立日期 | 2026-01-10 |
-| 最後更新 | 2026-01-10 |
+| 最後更新 | 2026-02-20 |
 | 專案代號 | ECOMMERCE-MSA-POC |
 | 適用範圍 | Infrastructure & Deployment |
 
@@ -71,48 +71,65 @@ flowchart TB
 ## 2. 目錄結構
 
 ```
-ecommerce-msa/
+rbac-sso-poc/                              # 實際專案根目錄
 ├── deploy/
 │   ├── docker/
-│   │   ├── docker-compose.yml           # 完整環境
-│   │   ├── docker-compose.infra.yml     # 僅基礎設施（本地開發）
-│   │   └── .env                         # 環境變數
+│   │   ├── docker-compose.yml             # 完整環境 (7 services)
+│   │   ├── docker-compose.infra.yml       # 僅基礎設施（本地開發）
+│   │   ├── .env                           # 環境變數
+│   │   ├── Dockerfile.gateway             # Gateway 映像
+│   │   ├── Dockerfile.product-service     # Product Service 映像
+│   │   └── Dockerfile.user-service        # User Service 映像
 │   │
 │   ├── k8s/
-│   │   ├── base/                        # 基礎配置
+│   │   ├── base/                          # 基礎配置
 │   │   │   ├── namespace.yaml
 │   │   │   ├── configmap.yaml
-│   │   │   ├── secrets.yaml
-│   │   │   ├── gateway/
-│   │   │   ├── user-service/
-│   │   │   ├── product-service/
-│   │   │   └── kustomization.yaml
+│   │   │   └── secrets.yaml
 │   │   │
-│   │   ├── overlays/                    # 環境覆蓋
-│   │   │   ├── sit/
-│   │   │   ├── uat/
-│   │   │   └── prod/
+│   │   ├── infrastructure/                # 基礎設施服務
+│   │   │   ├── keycloak.yaml
+│   │   │   ├── openldap.yaml
+│   │   │   └── postgres.yaml
 │   │   │
-│   │   └── blue-green/                  # 藍綠部署
-│   │       ├── deployment-blue.yaml
-│   │       ├── deployment-green.yaml
-│   │       └── service.yaml
+│   │   ├── services/                      # 標準部署
+│   │   │   ├── gateway.yaml
+│   │   │   ├── product-service.yaml
+│   │   │   ├── user-service.yaml
+│   │   │   └── nodeport-services.yaml
+│   │   │
+│   │   ├── services-mtls/                 # mTLS 部署變體
+│   │   │   ├── gateway-mtls.yaml
+│   │   │   ├── product-service-mtls.yaml
+│   │   │   └── user-service-mtls.yaml
+│   │   │
+│   │   ├── security/                      # 安全配置
+│   │   │   └── cert-manager/
+│   │   │       ├── namespace.yaml
+│   │   │       ├── ca-issuer.yaml
+│   │   │       └── service-certificates.yaml
+│   │   │
+│   │   └── kind-config.yaml               # Kind 叢集配置
 │   │
 │   └── scripts/
-│       ├── start-local.sh           # 本地開發 (Docker infra + OS Java)
-│       ├── start-docker.sh          # Docker Compose 完整環境
-│       ├── start-k8s.sh             # Kubernetes 部署 (Kind)
-│       ├── load-test.sh             # 壓力測試腳本
-│       ├── blue-green-deploy.sh
-│       ├── blue-green-switch.sh
-│       └── blue-green-verify.sh
+│       ├── start-local.sh                 # 本地開發 (Docker infra + OS Java)
+│       ├── start-docker.sh                # Docker Compose 完整環境
+│       ├── start-k8s.sh                   # Kubernetes 部署 (Kind)
+│       ├── k8s-deploy.sh                  # 建置映像 + K8s 部署
+│       ├── k8s-mtls-deploy.sh             # mTLS 部署 (含 cert-manager)
+│       ├── integration-test.sh            # Docker 整合測試 (16 tests)
+│       ├── k8s-integration-test.sh        # K8s 整合測試 (36 tests)
+│       └── load-test.sh                   # 壓力測試腳本
 │
 └── infra/
+    ├── docker-compose.yml                 # 開發用基礎設施
     ├── ldap/
-    │   └── bootstrap.ldif
+    │   └── bootstrap.ldif                 # LDAP 初始使用者/群組
     └── keycloak/
-        └── realm-export.json
+        └── realm-export.json              # Keycloak Realm 匯出
 ```
+
+> **注意**: 原規劃的 `overlays/` (sit/uat/prod) 和 `blue-green/` 目錄尚未建立，藍綠部署腳本尚未實作。
 
 ---
 
@@ -505,13 +522,14 @@ member: uid=test.user,ou=users,dc=ecommerce,dc=local
 #### namespace.yaml
 
 ```yaml
-# deploy/k8s/base/namespace.yaml
+# deploy/k8s/base/namespace.yaml (實際)
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: ecommerce
+  name: rbac-sso
   labels:
-    app.kubernetes.io/name: ecommerce
+    app.kubernetes.io/name: rbac-sso-poc
+    app.kubernetes.io/part-of: ecommerce-platform
 ```
 
 #### configmap.yaml
@@ -593,32 +611,29 @@ spec:
       targetPort: 8080
 ```
 
-#### kustomization.yaml
+#### K8s 資源總覽 (實際)
 
-```yaml
-# deploy/k8s/base/kustomization.yaml
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
+> **注意**: 實際專案未使用 Kustomize，而是直接以 `kubectl apply -f` 部署各目錄。
 
-namespace: ecommerce
+```
+deploy/k8s/
+├── base/                              # 基礎配置 (namespace, configmap, secrets)
+├── infrastructure/                    # keycloak, openldap, postgres
+├── services/                          # 標準部署 + NodePort
+├── services-mtls/                     # mTLS 部署變體
+├── security/cert-manager/             # cert-manager CA + certificates
+└── kind-config.yaml                   # Kind 叢集配置
 
-resources:
-  - namespace.yaml
-  - configmap.yaml
-  - secrets.yaml
-  - gateway/deployment.yaml
-  - user-service/deployment.yaml
-  - product-service/deployment.yaml
-
-commonLabels:
-  app.kubernetes.io/part-of: ecommerce
+Namespace: rbac-sso
 ```
 
 ---
 
-## 7. 藍綠部署 (Blue-Green Deployment)
+## 7. 藍綠部署 (Blue-Green Deployment) — 尚未實作
 
-### 7.1 藍綠部署架構
+> **狀態**: 此章節為原始規劃設計，尚未實際建立 YAML 與腳本。目前僅有標準部署與 mTLS 部署變體。
+
+### 7.1 藍綠部署架構（規劃中）
 
 ```mermaid
 flowchart TB
@@ -1131,13 +1146,15 @@ echo -e "${GREEN}======================================${NC}"
 
 ### 9.1 服務端點
 
-| Service | Local | Docker | K8s |
-|---------|-------|--------|-----|
-| Gateway | :8080 | :8080 | :80 |
-| User Service | :8081 | :8081 | :8081 |
-| Product Service | :8082 | :8082 | :8082 |
-| Keycloak | :8180 | :8180 | :8180 |
+| Service | Local | Docker | K8s (NodePort) |
+|---------|-------|--------|----------------|
+| Gateway | :8080 | :8080 | :30080 |
+| Product Service | :8081 | :8081 | :30081 |
+| User Service | :8082 | :8082 | :30082 |
+| Keycloak | :8180 | :8180 | :30180 |
 | phpLDAPadmin | :8181 | :8181 | - |
+| OpenLDAP | :389 | :389 | ClusterIP |
+| PostgreSQL | :5432 | :5432 | ClusterIP |
 
 ### 9.2 測試帳號
 
@@ -1150,18 +1167,21 @@ echo -e "${GREEN}======================================${NC}"
 ### 9.3 快速開始
 
 ```bash
-# 1. 本地開發（僅基礎設施）
-cd deploy/docker
-docker-compose -f docker-compose.infra.yml up -d
+# 1. 本地開發（僅基礎設施 + IDE 啟動服務）
+./deploy/scripts/start-local.sh
 
-# 2. IDE 啟動服務
-./gradlew :services:gateway:bootRun
-./gradlew :services:user-service:bootRun
-./gradlew :services:product-service:bootRun
+# 2. Docker 完整環境
+./deploy/scripts/start-docker.sh
 
-# 3. Docker 完整環境
-./deploy/scripts/build-all.sh
-docker-compose up -d
+# 3. Kubernetes 部署 (Kind)
+./deploy/scripts/start-k8s.sh
+
+# 4. Kubernetes mTLS 部署
+./deploy/scripts/k8s-mtls-deploy.sh --build
+
+# 5. 執行整合測試
+./deploy/scripts/integration-test.sh        # Docker 環境
+./deploy/scripts/k8s-integration-test.sh    # K8s 環境
 
 # 4. K8s 部署
 kubectl apply -k deploy/k8s/base/
@@ -1464,7 +1484,7 @@ flowchart TD
 
 ---
 
-## 12. 實作狀態
+## 12. 實作狀態 (更新: 2026-02-20)
 
 ### 12.1 分支策略
 
@@ -1484,20 +1504,41 @@ flowchart TD
 | gateway-service | 10+ | 92% | ✅ |
 | audit-lib | 150+ | 67% | ⚠️ |
 | scenario-tests | 18 scenarios | - | ✅ |
+| Docker 整合測試 | 16 | 100% | ✅ |
+| K8s 整合測試 | 36 | 100% | ✅ |
 | **總計** | **350+** | **80%+** | ✅ |
 
 ### 12.3 已完成基礎設施
 
 | 組件 | 狀態 | 說明 |
 |------|------|------|
-| Docker Compose 開發環境 | ✅ | keycloak, postgres, openldap |
-| Kubernetes 部署腳本 | ✅ | kustomize, blue-green |
+| Docker Compose 開發環境 | ✅ | keycloak, postgres, openldap, phpldapadmin |
+| Docker Compose 完整環境 | ✅ | 7 services (含微服務) |
+| Kubernetes 部署 (Kind) | ✅ | base + infrastructure + services |
+| Kubernetes mTLS 變體 | ✅ | services-mtls + cert-manager |
 | OpenLDAP 初始化 | ✅ | bootstrap.ldif |
 | Keycloak Realm 配置 | ✅ | LDAP federation, group mapping |
-| Gradle 多模組專案 | ✅ | 共用函式庫 + 微服務 |
+| Gradle 多模組專案 | ✅ | 4 libs + 3 services + 1 app + 1 test |
+| Dockerfiles | ✅ | gateway, product-service, user-service |
+| NodePort 暴露 | ✅ | gateway:30080, keycloak:30180, etc. |
 | 壓力測試腳本 | ✅ | load-test.sh |
 | 本地開發腳本 | ✅ | start-local.sh |
-| mTLS 憑證管理 | ✅ | cert-manager + self-signed CA |
+| Docker 整合測試腳本 | ✅ | integration-test.sh (16 tests) |
+| K8s 整合測試腳本 | ✅ | k8s-integration-test.sh (36 tests) |
+| mTLS 憑證管理 | ✅ | cert-manager v1.14.0 + self-signed CA |
+
+### 12.4 未實作項目
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| Kustomize overlays (sit/uat/prod) | ❌ | 原規劃有，但未建立目錄 |
+| Blue-Green 部署 YAML | ❌ | 原規劃有，但未建立 |
+| Blue-Green 部署腳本 | ❌ | blue-green-deploy/switch/verify.sh 未實作 |
+| Kubernetes NetworkPolicy | ❌ | 網路隔離尚未配置 |
+| CI/CD Pipeline | ❌ | 無 GitHub Actions / Jenkins 等 |
+| Prometheus / Grafana | ❌ | 監控堆疊未部署 |
+| 集中式日誌 (ELK) | ❌ | 日誌收集未建置 |
+| Secrets 管理 (Vault) | ❌ | 使用 K8s Secret (base64) |
 
 ---
 

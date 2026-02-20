@@ -4,9 +4,9 @@
 
 | 項目 | 內容 |
 |------|------|
-| 文件版本 | 3.2 |
+| 文件版本 | 3.3 |
 | 建立日期 | 2025-01-10 |
-| 最後更新 | 2026-01-10 |
+| 最後更新 | 2026-02-20 |
 | 專案代號 | ECOMMERCE-MSA-POC |
 | 架構模式 | Hexagonal Architecture + CQRS + DDD |
 
@@ -1912,8 +1912,9 @@ libs/audit-lib/
 
 | 項目 | 內容 |
 |------|------|
-| 文件版本 | 1.0 |
+| 文件版本 | 1.1 |
 | 建立日期 | 2026-01-10 |
+| 最後更新 | 2026-02-20 |
 | 專案代號 | ECOMMERCE-MULTITENANT-POC |
 | 適用範圍 | Application Architecture |
 
@@ -1925,17 +1926,24 @@ libs/audit-lib/
 
 | Category | Technology | Version |
 |----------|------------|---------|
-| Language | Java | 21 (LTS) |
-| Framework | Spring Boot | 3.3.x |
-| Build Tool | Gradle (Kotlin DSL) | 8.5+ |
-| Gateway | Spring Cloud Gateway | 4.1.x |
+| Language | Java | 17 (LTS) |
+| Framework | Spring Boot | 3.3.5 |
+| Build Tool | Gradle (Groovy DSL) | 8.5+ |
+| Gateway | Spring Cloud Gateway | 4.1.x (Cloud 2023.0.3) |
 | Security | Spring Security + OAuth2 | 6.3.x |
-| Identity | Keycloak | 24.x |
-| API Doc | SpringDoc OpenAPI | 2.5.x |
-| Database | PostgreSQL | 16.x |
+| Identity | Keycloak | 24.0 |
+| API Doc | SpringDoc OpenAPI | 2.5.0 |
+| Database | H2 (Dev) / PostgreSQL 15 (Prod) | - |
 | ORM | Spring Data JPA | 3.3.x |
-| Testing | JUnit 5 + Cucumber | 7.x |
+| AOP | Spring AOP | 6.1.x |
+| Audit | audit-lib (Shared) | 1.0.x |
+| Metrics | Micrometer | 1.12.x |
+| Architecture Test | ArchUnit | 1.2.1 |
+| Contract Test | Spring Cloud Contract | 4.1.4 |
+| Testing | JUnit 5 + Cucumber | 7.18.0 |
+| Testcontainers | Testcontainers | 1.19.8 |
 | Container | Docker | 24.x |
+| Orchestration | Kubernetes (Kind) | 1.28+ |
 
 ### 1.2 模組依賴關係
 
@@ -1949,16 +1957,16 @@ libs/audit-lib/
             │                 │                 │
             ▼                 ▼                 ▼
 ┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
-│  product-service  │ │   user-service    │ │  (future svc)     │
-└─────────┬─────────┘ └─────────┬─────────┘ └───────────────────┘
-          │                     │
-          └──────────┬──────────┘
-                     │
-          ┌──────────┼──────────┐
-          │          │          │
-          ▼          ▼          ▼
-┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│  common-lib  │ │ security-lib │ │  tenant-lib  │
+│  product-service  │ │   user-service    │ │   rbac-demo       │
+└─────────┬─────────┘ └─────────┬─────────┘ └─────────┬─────────┘
+          │                     │                     │
+          └──────────┬──────────┴──────────┬──────────┘
+                     │                     │
+          ┌──────────┼──────────┐          │
+          │          │          │          │
+          ▼          ▼          ▼          ▼
+┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+│  common-lib  │ │ security-lib │ │  tenant-lib  │ │  audit-lib   │
 └──────────────┘ └──────────────┘ └──────────────┘
 ```
 
@@ -1966,84 +1974,44 @@ libs/audit-lib/
 
 ## 2. Gradle Multi-Module 設定
 
-### 2.1 根目錄 settings.gradle.kts
+### 2.1 根目錄 settings.gradle (實際)
 
-```kotlin
-rootProject.name = "ecommerce-multitenant-poc"
+```groovy
+rootProject.name = 'rbac-sso-poc'
 
 // ===== 共用模組 =====
-include("libs:common-lib")
-include("libs:security-lib")
-include("libs:tenant-lib")
+include 'libs:audit-lib'
+include 'libs:common-lib'
+include 'libs:security-lib'
+include 'libs:tenant-lib'
 
 // ===== 微服務 =====
-include("services:product-service")
-include("services:user-service")
-include("services:gateway-service")
+include 'services:product-service'
+include 'services:user-service'
+include 'services:gateway-service'
 
-// ===== 測試模組 =====
-include("tests:scenario-tests")
+// ===== 應用程式 (保留既有) =====
+include 'apps:rbac-demo'
 
-// ===== Dependency Version Catalog =====
-dependencyResolutionManagement {
-    versionCatalogs {
-        create("libs") {
-            // Versions
-            version("spring-boot", "3.3.0")
-            version("spring-cloud", "2023.0.2")
-            version("lombok", "1.18.32")
-            version("mapstruct", "1.5.5.Final")
-            version("springdoc", "2.5.0")
-            version("cucumber", "7.18.0")
-            version("testcontainers", "1.19.8")
-            
-            // Spring Boot Starters
-            library("spring-boot-starter-web", "org.springframework.boot", "spring-boot-starter-web").versionRef("spring-boot")
-            library("spring-boot-starter-data-jpa", "org.springframework.boot", "spring-boot-starter-data-jpa").versionRef("spring-boot")
-            library("spring-boot-starter-security", "org.springframework.boot", "spring-boot-starter-security").versionRef("spring-boot")
-            library("spring-boot-starter-oauth2-resource-server", "org.springframework.boot", "spring-boot-starter-oauth2-resource-server").versionRef("spring-boot")
-            library("spring-boot-starter-validation", "org.springframework.boot", "spring-boot-starter-validation").versionRef("spring-boot")
-            library("spring-boot-starter-test", "org.springframework.boot", "spring-boot-starter-test").versionRef("spring-boot")
-            
-            // Spring Cloud
-            library("spring-cloud-starter-gateway", "org.springframework.cloud", "spring-cloud-starter-gateway").versionRef("spring-cloud")
-            
-            // Database
-            library("postgresql", "org.postgresql", "postgresql").version("42.7.3")
-            library("h2", "com.h2database", "h2").version("2.2.224")
-            
-            // Tools
-            library("lombok", "org.projectlombok", "lombok").versionRef("lombok")
-            library("mapstruct", "org.mapstruct", "mapstruct").versionRef("mapstruct")
-            library("mapstruct-processor", "org.mapstruct", "mapstruct-processor").versionRef("mapstruct")
-            
-            // API Docs
-            library("springdoc-openapi-starter", "org.springdoc", "springdoc-openapi-starter-webmvc-ui").versionRef("springdoc")
-            
-            // Testing
-            library("cucumber-java", "io.cucumber", "cucumber-java").versionRef("cucumber")
-            library("cucumber-spring", "io.cucumber", "cucumber-spring").versionRef("cucumber")
-            library("cucumber-junit-platform", "io.cucumber", "cucumber-junit-platform-engine").versionRef("cucumber")
-            library("testcontainers-postgresql", "org.testcontainers", "postgresql").versionRef("testcontainers")
-            library("testcontainers-junit", "org.testcontainers", "junit-jupiter").versionRef("testcontainers")
-        }
-    }
-}
+// ===== 整合測試 =====
+include 'tests:scenario-tests'
 ```
 
-### 2.2 根目錄 build.gradle.kts
+> **注意**: 實際專案使用 Gradle Groovy DSL (`.gradle`)，非 Kotlin DSL (`.gradle.kts`)。版本管理透過 `build.gradle` 的 `ext {}` 區塊而非 Version Catalog。
 
-```kotlin
+### 2.2 根目錄 build.gradle (實際)
+
+```groovy
 plugins {
-    java
-    id("org.springframework.boot") version "3.3.0" apply false
-    id("io.spring.dependency-management") version "1.1.5" apply false
-    id("jacoco")
+    id 'java'
+    id 'org.springframework.boot' version '3.3.5' apply false
+    id 'io.spring.dependency-management' version '1.1.6' apply false
+    id 'jacoco'
 }
 
 allprojects {
-    group = "com.example.ecommerce"
-    version = "1.0.0-SNAPSHOT"
+    group = 'com.example.ecommerce'
+    version = '1.0.0-SNAPSHOT'
 
     repositories {
         mavenCentral()
@@ -2051,84 +2019,74 @@ allprojects {
 }
 
 subprojects {
-    apply(plugin = "java")
-    apply(plugin = "jacoco")
-    
+    apply plugin: 'java'
+    apply plugin: 'jacoco'
+
+    ext {
+        springCloudVersion = '2023.0.3'
+        springDocVersion = '2.5.0'
+        cucumberVersion = '7.18.0'
+        testcontainersVersion = '1.19.8'
+    }
+
     java {
-        sourceCompatibility = JavaVersion.VERSION_21
-        targetCompatibility = JavaVersion.VERSION_21
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
-    tasks.withType<JavaCompile> {
-        options.encoding = "UTF-8"
-        options.compilerArgs.add("-parameters")
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+        options.compilerArgs += ['-parameters']
     }
 
-    tasks.withType<Test> {
+    tasks.withType(Test).configureEach {
         useJUnitPlatform()
     }
-    
+
     tasks.jacocoTestReport {
         reports {
-            xml.required.set(true)
-            html.required.set(true)
+            xml.required = true
+            html.required = true
         }
-    }
-}
-
-// 根專案測試覆蓋率彙總
-tasks.register<JacocoReport>("jacocoRootReport") {
-    dependsOn(subprojects.map { it.tasks.named("test") })
-    
-    additionalSourceDirs.setFrom(subprojects.map { it.sourceSets.main.get().allSource.srcDirs })
-    sourceDirectories.setFrom(subprojects.map { it.sourceSets.main.get().allSource.srcDirs })
-    classDirectories.setFrom(subprojects.map { it.sourceSets.main.get().output })
-    executionData.setFrom(subprojects.mapNotNull { 
-        it.tasks.findByName("test")?.let { task ->
-            (task as Test).extensions.getByType(JacocoTaskExtension::class).destinationFile
-        }
-    })
-    
-    reports {
-        xml.required.set(true)
-        html.required.set(true)
     }
 }
 ```
 
-### 2.3 gradle.properties
+### 2.3 版本對照 (文件 vs 實際)
 
-```properties
-# Gradle
-org.gradle.parallel=true
-org.gradle.caching=true
-org.gradle.daemon=true
-org.gradle.jvmargs=-Xmx2g -XX:+HeapDumpOnOutOfMemoryError
+> **重要**: 以下為原始規劃與實際實作的差異對照。
 
-# Project
-projectVersion=1.0.0-SNAPSHOT
-javaVersion=21
-```
+| 項目 | 原始規劃 | 實際實作 |
+|------|----------|----------|
+| Java | 21 (LTS) | **17 (LTS)** |
+| Gradle DSL | Kotlin (.kts) | **Groovy (.gradle)** |
+| Spring Boot | 3.3.0 | **3.3.5** |
+| Spring Cloud | 2023.0.2 | **2023.0.3** |
+| Dependency Management | Version Catalog | **ext {} 區塊** |
 
 ---
 
 ## 3. 共用模組 (libs/)
 
-### 3.1 common-lib/build.gradle.kts
+### 3.1 common-lib/build.gradle (實際)
 
-```kotlin
+```groovy
 plugins {
-    `java-library`
+    id 'java-library'
 }
 
 dependencies {
-    api(libs.lombok)
-    annotationProcessor(libs.lombok)
-    
-    api("jakarta.validation:jakarta.validation-api:3.0.2")
-    api("com.fasterxml.jackson.core:jackson-annotations:2.17.1")
-    
-    testImplementation(libs.spring.boot.starter.test)
+    api 'jakarta.validation:jakarta.validation-api:3.0.2'
+    api 'com.fasterxml.jackson.core:jackson-annotations:2.17.1'
+
+    compileOnly 'org.projectlombok:lombok:1.18.32'
+    annotationProcessor 'org.projectlombok:lombok:1.18.32'
+
+    // JPA for BaseEntity (optional dependency)
+    compileOnly 'jakarta.persistence:jakarta.persistence-api:3.1.0'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testImplementation 'org.assertj:assertj-core:3.25.3'
 }
 ```
 
@@ -3086,6 +3044,42 @@ public UUID handle(CreateProductCommand cmd) {
 | API Gateway | ✅ | Spring Cloud Gateway |
 | BDD Tests | ✅ | Cucumber + Chinese Gherkin |
 | Architecture Tests | ✅ | ArchUnit |
+| Docker Compose 部署 | ✅ | 7 services, integration tested |
+| Kubernetes 部署 | ✅ | Kind cluster, base + mTLS variants |
+| mTLS 東西向安全 | ✅ | cert-manager + Spring Boot SSL Bundle |
+| Spring Cloud Contract | ✅ | Stubs JAR, Provider 測試 |
+| 整合測試 (Docker) | ✅ | 16/16 通過 |
+| 整合測試 (K8s) | ✅ | 36/36 通過 |
+
+### 7.6 實際專案模組結構
+
+```
+rbac-sso-poc/                        # rootProject.name
+├── libs/
+│   ├── audit-lib/                   # 稽核函式庫 (AOP + Domain Events)
+│   ├── common-lib/                  # 共用 DTO, Exception, BaseEntity
+│   ├── security-lib/                # OAuth2 Resource Server, JWT 轉換
+│   └── tenant-lib/                  # 多租戶 TenantContext + Filter
+├── services/
+│   ├── gateway-service/ (:8080)     # Spring Cloud Gateway
+│   ├── product-service/ (:8081)     # 商品管理 (Hexagonal + DDD + CQRS)
+│   └── user-service/ (:8082)       # 使用者 Profile (JWT 解析)
+├── apps/
+│   └── rbac-demo/                   # 既有 Demo App (audit-lib 整合)
+├── tests/
+│   └── scenario-tests/              # Cucumber BDD (18 scenarios, zh-TW)
+├── deploy/
+│   ├── docker/                      # Docker Compose + Dockerfile
+│   ├── k8s/                         # Kubernetes manifests
+│   └── scripts/                     # 部署與測試腳本
+├── infra/
+│   ├── docker-compose.yml           # 開發環境 (Keycloak, LDAP, Postgres)
+│   ├── keycloak/realm-export.json   # Realm 配置
+│   └── ldap/bootstrap.ldif          # LDAP 初始資料
+└── specs/
+    ├── 001-shared-audit-lib/        # 稽核函式庫規格 (已完成)
+    └── 002-multi-tenant-ecommerce/  # 多租戶電商規格 (已完成)
+```
 
 ---
 

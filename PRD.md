@@ -4,9 +4,9 @@
 
 | 項目 | 內容 |
 |------|------|
-| 文件版本 | 3.2 |
+| 文件版本 | 3.3 |
 | 建立日期 | 2025-01-10 |
-| 最後更新 | 2026-01-10 |
+| 最後更新 | 2026-02-20 |
 | 專案代號 | ECOMMERCE-MSA-POC |
 | 架構模式 | DDD + CQRS + Hexagonal Architecture |
 
@@ -1138,40 +1138,40 @@
 
 ### 8.1 DDD 驗收
 
-- [ ] 領域模型正確封裝業務邏輯
-- [ ] 聚合邊界明確，不變量得到保護
-- [ ] Value Objects 不可變且驗證自身
-- [ ] Domain Events 在聚合狀態變更時發布
-- [ ] 無 Anemic Domain Model（貧血模型）
+- [x] 領域模型正確封裝業務邏輯
+- [x] 聚合邊界明確，不變量得到保護
+- [x] Value Objects 不可變且驗證自身
+- [x] Domain Events 在聚合狀態變更時發布
+- [x] 無 Anemic Domain Model（貧血模型）
 
 ### 8.2 CQRS 驗收
 
-- [ ] Commands 與 Queries 完全分離
-- [ ] Command Handler 只接受 Command，回傳 void 或 ID
-- [ ] Query Handler 只接受 Query，回傳 Read Model
-- [ ] Read Model 針對特定查詢場景設計
+- [x] Commands 與 Queries 完全分離
+- [x] Command Handler 只接受 Command，回傳 void 或 ID
+- [x] Query Handler 只接受 Query，回傳 Read Model
+- [x] Read Model 針對特定查詢場景設計
 
 ### 8.3 六角形架構驗收
 
-- [ ] Domain 層無任何外部框架依賴
-- [ ] Ports 定義清晰的介面
-- [ ] Adapters 可替換
-- [ ] 依賴方向：Adapter → Application → Domain
+- [x] Domain 層無任何外部框架依賴
+- [x] Ports 定義清晰的介面
+- [x] Adapters 可替換
+- [x] 依賴方向：Adapter → Application → Domain
 
 ### 8.4 稽核機制驗收
 
-- [ ] 稽核邏輯透過 AOP 實現，與業務邏輯完全分離
-- [ ] 稽核函式庫可作為獨立依賴被不同微服務引用
-- [ ] 所有標註 `@Auditable` 的操作自動產生稽核日誌
-- [ ] 稽核儲存採用 Append-Only 模式，不允許更新或刪除
-- [ ] Payload 超過 64 KB 時正確截斷並標註
-- [ ] 敏感欄位正確遮蔽（保留格式，隱藏值）
-- [ ] 稽核失敗不影響業務操作執行
-- [ ] 監控指標正確暴露（事件計數、延遲、佇列深度）
-- [ ] 寫入吞吐量達標（100-500 events/second）
-- [ ] 擷取延遲 < 50ms（正常負載）
-- [ ] 查詢效能達標（百萬筆記錄 5 秒內回應）
-- [ ] 契約測試 (Contract Testing) 通過，確保 API 相容性
+- [x] 稽核邏輯透過 AOP 實現，與業務邏輯完全分離
+- [x] 稽核函式庫可作為獨立依賴被不同微服務引用
+- [x] 所有標註 `@Auditable` 的操作自動產生稽核日誌
+- [x] 稽核儲存採用 Append-Only 模式，不允許更新或刪除
+- [x] Payload 超過 64 KB 時正確截斷並標註
+- [x] 敏感欄位正確遮蔽（保留格式，隱藏值）
+- [x] 稽核失敗不影響業務操作執行
+- [x] 監控指標正確暴露（事件計數、延遲、佇列深度）
+- [ ] 寫入吞吐量達標（100-500 events/second）— 未進行正式基準測試
+- [ ] 擷取延遲 < 50ms（正常負載）— 未進行正式基準測試
+- [ ] 查詢效能達標（百萬筆記錄 5 秒內回應）— 未進行正式基準測試
+- [x] 契約測試 (Contract Testing) 通過，確保 API 相容性
 
 ### 8.5 契約測試驗收 (Consumer-Driven Contract)
 
@@ -1179,7 +1179,7 @@
 - [x] Provider 端自動產生並執行契約測試
 - [x] 產生 Stubs JAR 供 Consumer 端使用
 - [x] 契約涵蓋所有公開 API 端點（查詢、錯誤處理）
-- [ ] 契約測試整合至 CI/CD 流程
+- [ ] 契約測試整合至 CI/CD 流程 — 尚無 CI/CD 管線
 
 ### 8.6 安全管控驗收
 
@@ -1200,7 +1200,7 @@
 - [x] ServiceAuthInterceptor 請求攔截器
 - [x] 預配置 RestTemplate (serviceRestTemplate)
 - [x] mTLS 雙向憑證驗證 (Spring Boot SSL Bundle + cert-manager)
-- [ ] Kubernetes NetworkPolicy 網路隔離
+- [ ] Kubernetes NetworkPolicy 網路隔離 — 待實作
 
 #### mTLS 驗證結果 (2026-01-11)
 
@@ -1258,11 +1258,12 @@ kubectl exec -n rbac-sso <pod> -- curl -s http://localhost:8090/actuator/health
 
 | 項目 | 內容 |
 |------|------|
-| 文件版本 | 1.0 |
+| 文件版本 | 1.1 |
 | 建立日期 | 2026-01-10 |
+| 最後更新 | 2026-02-20 |
 | 專案代號 | ECOMMERCE-MULTITENANT-POC |
 | 專案類型 | Monorepo (Gradle Multi-Module) |
-| 狀態 | 待實作 |
+| 狀態 | ✅ 已完成 |
 
 ---
 
@@ -1668,15 +1669,13 @@ Feature: 多租戶資料隔離
 | PUT | /api/products/{id} | 修改商品 | ADMIN |
 | DELETE | /api/products/{id} | 刪除商品 | ADMIN |
 
-### 6.2 使用者服務 API
+### 6.2 使用者服務 API (實際實作)
 
 | Method | Endpoint | 說明 | 權限 |
 |--------|----------|------|------|
-| GET | /api/users | 查詢使用者列表 | ADMIN |
-| GET | /api/users/{id} | 查詢單一使用者 | ADMIN |
-| POST | /api/users | 新增使用者 | ADMIN |
-| PUT | /api/users/{id} | 修改使用者 | ADMIN |
-| DELETE | /api/users/{id} | 刪除使用者 | ADMIN |
+| GET | /api/users/me | 取得當前使用者資訊 (從 JWT 解析) | All Authenticated |
+
+> **注意**: 使用者管理 (CRUD) 由 Keycloak + LDAP 負責，User Service 僅提供 JWT Profile 查詢。
 
 ---
 
@@ -1749,6 +1748,30 @@ Feature: 多租戶資料隔離
 | API Gateway | ✅ 完成 | 全部 |
 | Cucumber BDD Tests | ✅ 完成 | 全部 |
 | ArchUnit Architecture Tests | ✅ 完成 | 全部 |
+| Docker Compose 部署 | ✅ 完成 | 全部 |
+| Kubernetes 部署 (Kind) | ✅ 完成 | 全部 |
+| mTLS 東西向安全 | ✅ 完成 | 全部 |
+| Docker 整合測試 (16/16) | ✅ 完成 | 全部 |
+| K8s 整合測試 (36/36) | ✅ 完成 | 全部 |
+| Spring Cloud Contract Tests | ✅ 完成 | 全部 |
+
+#### 整合測試結果
+
+| 環境 | 測試數 | 通過 | 失敗 | 日期 |
+|------|--------|------|------|------|
+| Docker Compose | 16 | 16 | 0 | 2026-01-10 |
+| Kubernetes (Kind) | 36 | 36 | 0 | 2026-01-10 |
+
+#### 未實作功能 (Out of Scope)
+
+| 功能 | 原因 |
+|------|------|
+| 訂單管理 / 購物車 / 付款 | PoC 範圍外 |
+| Prometheus / Grafana 監控 | 基礎設施層級，非 PoC 核心 |
+| 分散式追蹤 (Zipkin/Jaeger) | 可觀測性延伸 |
+| Service Mesh (Istio/Linkerd) | mTLS 改進方案，待評估 |
+| CI/CD Pipeline | 未建置 |
+| Admin Dashboard / Web UI | 無前端實作 |
 
 ---
 
