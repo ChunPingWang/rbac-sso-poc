@@ -44,6 +44,8 @@ spring:
       resourceserver:
         jwt:
           issuer-uri: http://localhost:8180/realms/rbac-sso-realm
+          audiences:
+            - rbac-sso-gateway
 
 server:
   port: 8080
